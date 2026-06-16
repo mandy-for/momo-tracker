@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Momo Cloud Tracker</title>
+    <style>
+        :root { --primary: #ff9a9e; --bg: #fff5f5; --text: #333; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 15px; display: flex; justify-content: center; }
+        .container { max-width: 500px; width: 100%; background: white; padding: 20px; border-radius: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #ff6b81; margin-bottom: 5px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; margin-top: 15px; }
+        .tab-btn { flex: 1; padding: 12px; border-radius: 10px; border: none; cursor: pointer; background: #eee; font-weight: bold; font-size: 0.95em; }
+        .tab-btn.active { background: #ff6b81; color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .section { background: #fff9f9; padding: 15px; border-radius: 12px; margin-bottom: 15px; border-left: 5px solid var(--primary); }
+        .input-group { display: flex; gap: 5px; margin-bottom: 10px; }
+        input, select { padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 1em; }
+        button { background: #ff6b81; color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { background: white; padding: 10px; margin-top: 5px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #eee; }
+        .history-card { border: 1px solid #eee; padding: 12px; border-radius: 12px; margin-bottom: 10px; font-size: 0.95em; background: #fafafa; }
+        .status-bar { text-align: center; font-size: 0.85em; color: #666; background: #f0f0f0; padding: 6px; border-radius: 8px; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🐶 Momo 雲端管家</h1>
+    <div id="syncStatus" class="status-bar">正在初始連線雲端...</div>
+    
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('today')">今日紀錄</button>
+        <button class="tab-btn" onclick="switchTab('history')">歷史回顧 📜</button>
+    </div>
+
+    <!-- TODAY TAB -->
+    <div id="todayTab" class="tab-content active">
+        <p id="displayDate" style="text-align:center; color:#555; font-weight: bold; margin-bottom: 15px;"></p>
+        
+        <div class="section">
+            <h3>🍖 飲食紀錄 (kcal)</h3>
+            <div class="input-group">
+                <input type="text" id="foodName" style="flex:2" placeholder="食物名稱 (例如: 乾糧)">
+                <input type="number" id="calories" style="flex:1" placeholder="卡路里">
+                <button onclick="addFood()">新增</button>
+            </div>
+            <ul id="foodList"></ul>
+            <p style="text-align:right; font-weight:bold; color: #ff6b81; font-size: 1.1em; margin-top: 10px;">今日總計: <span id="totalCal">0</span> kcal</p>
+        </div>
+
+        <div class="section">
+            <h3>💊 藥物 / 保健品狀態</h3>
+            <div class="input-group">
+                <input type="text" id="medName" style="flex:2" placeholder="藥名/維他命">
+                <select id="medTime"><option>早上</option><option>中午</option><option>夜晚</option><option>需要時</option></select>
+                <button onclick="addMed()">新增</button>
+            </div>
+            <ul id="medList"></ul>
+        </div>
+    </div>
+
+    <!-- HISTORY TAB -->
+    <div id="historyTab" class="tab-content">
+        <h3>📊 Google Sheet 雲端歷史紀錄</h3>
+        <div id="historyList">連線讀取中...</div>
+    </div>
+</div>
+
+<script>
+    // ⚠️ 貼上你喺 STEP 3 複製嘅 Google Web App URL 喺呢個引號入面：
+    const GOOGLE_SCRIPT_URL = "YOUR_DEPLOYED_WEB_APP_URL_HERE";
+
+    let foodData = JSON.parse(localStorage.getItem('momo_foodCloud')) || [];
+    let medData = JSON.parse(localStorage.getItem('momo_medCloud')) || [];
+    let historyData = [];
+    let lastActiveDate = localStorage.getItem('momo_last_dateCloud');
+
+    async function checkMidnightArchive() {
+        const now = new Date();
+        const currentDateStr = now.toLocaleDateString('zh-HK'); 
+        document.getElementById('displayDate').innerText = "今日日期: " + currentDateStr;
+
+        // Auto-archive if the system detects the calendar day transitioned in Hong Kong Time
+        if (lastActiveDate && lastActiveDate !== currentDateStr) {
+            if (foodData.length > 0 || medData.length > 0) {
+                document.getElementById('syncStatus').innerText = "⚡ 偵測到新一日！正在將昨日數據存檔至雲端...";
+                const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
+                const details = foodData.map(f => `${f.name}(${f.cal}kcal)`).join(', ') || '無紀錄';
+                const meds = medData.map(m => `${m.name}(${m.taken ? '✅已餵':'❌未餵'})`).join(', ') || '無紀錄';
+
+                try {
+                    await fetch(GOOGLE_SCRIPT_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: "append", date: lastActiveDate, totalCal, details, meds })
+                    });
+                    foodData = [];
+                    medData = [];
+                } catch (e) {
+                    console.error("Cloud upload error during midnight shift:", e);
+                }
+            }
+        }
+        lastActiveDate = currentDateStr;
+        localStorage.setItem('momo_last_dateCloud', lastActiveDate);
+        saveLocal();
+        renderTodayData();
+        fetchHistoryFromCloud();
+    }
+
+    async function fetchHistoryFromCloud() {
+        if(GOOGLE_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbyfHWx2XIEMHB_VqSiOol-4iOD3k-NwnFFtf13VH4AV6GvnJ5S972icBDXNBDxCNSOP/exec") {
+            document.getElementById('historyList').innerText = "提示：請在網頁代碼中設定您的 Google Web App URL。";
+            return;
+        }
+        try {
+            document.getElementById('syncStatus').innerText = "🔄 正在從 Google Sheet 同步最新數據...";
+            let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`);
+            historyData = await response.json();
+            historyData.reverse(); // Displays the newest calendar dates at the top
+            renderHistoryData();
+            document.getElementById('syncStatus').innerText = "✅ 雲端連線成功";
+        } catch (e) {
+            document.getElementById('syncStatus').innerText = "❌ 無法更新雲端，正顯示離線數據";
+            document.getElementById('historyList').innerText = "未能即時獲取雲端列表，請確保網路正常。";
+        }
+    }
+
+    function addFood() {
+        const name = document.getElementById('foodName').value.trim();
+        const cal = parseInt(document.getElementById('calories').value);
+        if (name && !isNaN(cal)) { 
+            foodData.push({name, cal}); 
+            saveLocal(); renderTodayData(); 
+            document.getElementById('foodName').value = '';
+            document.getElementById('calories').value = '';
+        }
+    }
+
+    function addMed() {
+        const name = document.getElementById('medName').value.trim();
+        const time = document.getElementById('medTime').value;
+        if (name) { 
+            medData.push({name, time, taken: false}); 
+            saveLocal(); renderTodayData(); 
+            document.getElementById('medName').value = '';
+        }
+    }
+
+    function toggleMed(idx) { medData[idx].taken = !medData[idx].taken; saveLocal(); renderTodayData(); }
+    
+    function saveLocal() {
+        localStorage.setItem('momo_foodCloud', JSON.stringify(foodData));
+        localStorage.setItem('momo_medCloud', JSON.stringify(medData));
+    }
+
+    function renderTodayData() {
+        const fList = document.getElementById('foodList');
+        fList.innerHTML = '';
+        let total = 0;
+        foodData.forEach(f => {
+            total += f.cal;
+            fList.innerHTML += `<li><span>${f.name}</span> <strong>${f.cal} kcal</strong></li>`;
+        });
+        document.getElementById('totalCal').innerText = total;
+
+        const mList = document.getElementById('medList');
+        mList.innerHTML = '';
+        medData.forEach((m, i) => {
+            mList.innerHTML += `<li><span>[${m.time}] ${m.name}</span> <button onclick="toggleMed(${i})" style="background:${m.taken?'#badc58':'#ffeaa7'}; color:${m.taken?'#444':'#d63031'}">${m.taken ? '✅ 已餵' : '❌ 未餵'}</button></li>`;
+        });
+    }
+
+    function renderHistoryData() {
+        const hList = document.getElementById('historyList');
+        if(historyData.length === 0) {
+            hList.innerHTML = "<p style='color:#888;text-align:center;padding:20px;'>您的 Google 試算表內目前沒有舊紀錄。</p>";
+            return;
+        }
+        hList.innerHTML = historyData.map(h => `
+            <div class="history-card">
+                <strong>📅 ${h.date}</strong> | <span style="color:#ff6b81;font-weight:bold;">🔥 ${h.totalCal} kcal</span><br>
+                <div style="margin-top:5px; color:#555; font-size:0.9em;">🍖 飲食細節: ${h.details}</div>
+                <div style="color:#555; font-size:0.9em;">💊 藥物紀錄: ${h.meds}</div>
+            </div>
+        `).join('');
+    }
+
+    function switchTab(tab) {
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(tab + 'Tab').classList.add('active');
+        event.currentTarget.classList.add('active');
+        if(tab === 'history') { fetchHistoryFromCloud(); }
+    }
+
+    // Initialize check
+    checkMidnightArchive();
+</script>
+</body>
+</html>
