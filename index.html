@@ -35,7 +35,7 @@
         .med-btn.no { background: #ffeaa7; color: #d63031; }
         .med-btn.disabled { background: #f5f5f5; color: #bbb; cursor: not-allowed; }
         
-        /* 圖表專用外框 */
+        /* 📈 圖表專用外框 */
         .chart-container { background: #fff; border: 1px solid #eee; padding: 10px; border-radius: 12px; margin-bottom: 15px; position: relative; width: 100%; box-sizing: border-box; }
     </style>
 </head>
@@ -46,7 +46,7 @@
     <div id="syncStatus" class="status-bar">🔄 正在初始連線雲端...</div>
     
     <div class="chart-container">
-        <canvas id="kcalChart" style="width:100%; height:180px;"></canvas>
+        <canvas id="kcalChart" style="width:100%; height:190px;"></canvas>
     </div>
 
     <div class="tabs">
@@ -99,6 +99,7 @@
 </div>
 
 <script>
+    // 🔗 你的專屬 Web App URL
     const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwZzY5dRW47mIR2jBHDsa47JlTQmQD2OlM93Z31_2mn6QsEFfE2LEOdwXbAmngri_7QXw/exec';
 
     const MED_TEMPLATES = [
@@ -115,15 +116,15 @@
         medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
     }
 
-    let historyData = [];
+    let historyData = []; // 儲存由新到舊排序的數據 (Newest to Oldest)
     let lastActiveDate = localStorage.getItem('momo_last_date');
-    let myChart = null; // 存放圖表對象
+    let myChart = null; 
 
-    // 格式化日期函數：將任何日期轉化為 "Mon 15-Jun-26" 格式
+    // 格式化日期函數：例如 "Mon 15-Jun-26"
     function formatToMomoDate(dateInput) {
         try {
             const d = new Date(dateInput);
-            if (isNaN(d.getTime())) return dateInput; // 如果不是有效日期，回傳原文字
+            if (isNaN(d.getTime())) return dateInput; 
             
             const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
             const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -131,12 +132,10 @@
             const weekday = weekdays[d.getDay()];
             const day = String(d.getDate()).padStart(2, '0');
             const month = months[d.getMonth()];
-            const year = String(d.getFullYear()).slice(-2); // 攞後兩位數例如 26
+            const year = String(d.getFullYear()).slice(-2); 
             
             return `${weekday} ${day}-${month}-${year}`;
-        } catch(e) {
-            return dateInput;
-        }
+        } catch(e) { return dateInput; }
     }
 
     function updateCalcPreview() {
@@ -190,17 +189,19 @@
         try {
             let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`, { method: 'GET', signal: controller.signal });
             clearTimeout(timeoutId);
-            historyData = await response.json();
+            let rawData = await response.json();
             
-            // 處理所有歷史數據的日期格式
-            historyData = historyData.map(item => {
-                item.originalDate = item.date; // 留底備用
-                item.date = formatToMomoDate(item.date); // 簡化
+            // 💡 關鍵排序：將歷史數據統一按照時間「從新到舊 (Newest to Oldest)」排序
+            rawData.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            // 格式化日期顯示
+            historyData = rawData.map(item => {
+                item.formattedDate = formatToMomoDate(item.date); 
                 return item;
             });
 
             renderHistoryData();
-            updateChart(); // 刷新圖表
+            updateChart(); // 刷新趨勢圖
             document.getElementById('syncStatus').innerText = "✅ 雲端連線成功";
         } catch (e) {
             clearTimeout(timeoutId);
@@ -210,37 +211,44 @@
         }
     }
 
-    // 📊 核心圖表渲染邏輯
+    // 📊 核心圖表渲染邏輯 (升級為最新 1 個月 / 30 天長度)
     function updateChart() {
         const ctx = document.getElementById('kcalChart').getContext('2d');
         
-        // 攞最近 7 筆數據作顯示（如果無數據就顯示空白預設）
-        let chartData = [...historyData].reverse(); // 轉返正序時間軸
-        if(chartData.length > 7) chartData = chartData.slice(-7); // 只攞最近一星期
+        // 1. 因為 historyData 是由新到舊，圖表橫軸必須是「由舊到新」，所以要倒轉複製
+        let chartData = [...historyData].reverse(); 
+        
+        // 2. 💡 鎖定最新一個月：截取最後 30 天數據
+        if(chartData.length > 30) chartData = chartData.slice(-30); 
 
-        const labels = chartData.map(h => h.date.replace(/^[A-Za-z]+\s/, '')); // 移除星期幾令圖表橫軸更乾淨
+        // 3. 圖表標籤優化：30天太多字，過濾掉星期幾，只顯示日與月，例如 "15-Jun"
+        const labels = chartData.map(h => {
+            const parts = h.formattedDate.split(' '); // 分割 "Mon 15-Jun-26"
+            return parts[1] ? parts[1].replace(/-26$/, '') : h.formattedDate; // 變成 "15-Jun"
+        });
+        
         const kvals = chartData.map(h => parseFloat(h.totalCal) || 0);
 
-        // 動態判定顏色：大於等於 140 綠色，小於 140 紅色
+        // 🟢/🔴 140kcal 門檻顏色判定
         const pointColors = kvals.map(v => v >= 140 ? '#badc58' : '#ff7675');
         const pointBorderColors = kvals.map(v => v >= 140 ? '#6ab04c' : '#d63031');
 
-        if (myChart) { myChart.destroy(); } // 銷毀舊圖表防止重疊
+        if (myChart) { myChart.destroy(); } 
 
         myChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels.length ? labels : ['無數據'],
                 datasets: [{
-                    label: '每日卡路里 (kcal)',
+                    label: '每日卡路里',
                     data: kvals.length ? kvals : [0],
                     borderColor: '#ff9a9e',
-                    borderWidth: 3,
+                    borderWidth: 2.5,
                     pointBackgroundColor: pointColors,
                     pointBorderColor: pointBorderColors,
-                    pointRadius: 6,
-                    pointHoverRadius: 8,
-                    tension: 0.2,
+                    pointRadius: chartData.length > 15 ? 4 : 5, // 點多時自動縮小防擁擠
+                    pointHoverRadius: 7,
+                    tension: 0.15,
                     fill: false
                 }]
             },
@@ -249,12 +257,11 @@
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
-                    // 加入 140kcal 橫向安全基準線提示
                     tooltip: {
                         callbacks: {
                             label: function(context) {
                                 let val = context.parsed.y;
-                                return `卡路里: ${val} kcal (${val >= 140 ? '🟢 達標' : '🔴 未達標'})`;
+                                return `卡路里: ${val} kcal (${val >= 140 ? '🟢 達標' : '🔴 唔夠秤'})`;
                             }
                         }
                     }
@@ -264,12 +271,22 @@
                         min: 0,
                         suggestedMax: 200,
                         ticks: {
-                            stepSize: 20, // 👈 強制設定間距為 20
-                            color: '#666'
+                            stepSize: 20, // 👈 縱軸刻度固定以 20 為單位
+                            color: '#666',
+                            font: { size: 10 }
                         },
-                        grid: { color: '#f0f0f0' }
+                        grid: { color: '#f5f5f5' }
                     },
-                    x: { ticks: { color: '#666' }, grid: { display: false } }
+                    x: { 
+                        ticks: { 
+                            color: '#666', 
+                            font: { size: 9 },
+                            maxRotation: 45, // 30天數據時自動斜放防重疊
+                            autoSkip: true,   // 手機畫面上自動隔日跳過標籤防止字體撞埋一齊
+                            maxTicksLimit: 10 // 限制橫軸最多顯示 10 個日期文字
+                        }, 
+                        grid: { display: false } 
+                    }
                 }
             }
         });
@@ -339,21 +356,20 @@
 
     function renderHistoryData() {
         const hList = document.getElementById('historyList');
-        const reversedData = [...historyData]; // 歷史列表維持最新日期排最前
 
-        if(reversedData.length === 0) {
+        if(historyData.length === 0) {
             hList.innerHTML = "<p style='color:#888;text-align:center;padding:20px;'>暫無雲端紀錄。</p>";
             return;
         }
-        hList.innerHTML = reversedData.map(h => {
+        // 💡 這裡直接使用已經由新到舊排序好的 historyData 進行渲染
+        hList.innerHTML = historyData.map(h => {
             const val = parseFloat(h.totalCal) || 0;
-            // 歷史清單同步判定：少於 140 顯示紅字警告，達標顯示綠字
             const statusStyle = val >= 140 ? 'color:#6ab04c; font-weight:bold;' : 'color:#ff7675; font-weight:bold;';
             const statusIcon = val >= 140 ? '🟢' : '⚠️ 唔夠秤';
             
             return `
                 <div class="history-card">
-                    <strong>📅 ${h.date}</strong> | <span style="${statusStyle}">${statusIcon} ${h.totalCal} kcal</span><br>
+                    <strong>📅 ${h.formattedDate}</strong> | <span style="${statusStyle}">${statusIcon} ${h.totalCal} kcal</span><br>
                     <div style="margin-top:5px; color:#555; font-size:0.9em; word-break: break-all;">🍖 飲食: ${h.details}</div>
                     <div style="color:#555; font-size:0.85em; margin-top:3px; word-break: break-all; border-top:1px dashed #eee; padding-top:3px;">💊 藥物: ${h.meds}</div>
                 </div>
@@ -369,7 +385,6 @@
         if(tab === 'history') { fetchHistoryFromCloud(); }
     }
 
-    // 初始載入
     checkMidnightArchive();
     updateChart();
 </script>
