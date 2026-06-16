@@ -112,8 +112,8 @@
     }
 
     async function fetchHistoryFromCloud() {
-        if(GOOGLE_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbyfHWx2XIEMHB_VqSiOol-4iOD3k-NwnFFtf13VH4AV6GvnJ5S972icBDXNBDxCNSOP/exec") {
-            document.getElementById('historyList').innerText = "提示：請在網頁代碼中設定您的 Google Web App URL。";
+        if(GOOGLE_SCRIPT_URL === "YOUR_DEPLOYED_WEB_APP_URL_HERE") {
+            document.getElementById('historyList').innerText = "https://script.google.com/macros/s/AKfycbyfHWx2XIEMHB_VqSiOol-4iOD3k-NwnFFtf13VH4AV6GvnJ5S972icBDXNBDxCNSOP/exec";
             return;
         }
         try {
