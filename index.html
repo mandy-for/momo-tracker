@@ -35,16 +35,18 @@
         .med-btn.no { background: #ffeaa7; color: #d63031; }
         .med-btn.disabled { background: #f5f5f5; color: #bbb; cursor: not-allowed; }
         
-        /* 📈 圖表專用外框 */
         .chart-container { background: #fff; border: 1px solid #eee; padding: 10px; border-radius: 12px; margin-bottom: 15px; position: relative; width: 100%; box-sizing: border-box; }
+        .sync-btn { background: #6ab04c; margin-bottom: 15px; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h1>🐱😽 Momo 雲端管家</h1>
-    <div id="syncStatus" class="status-bar">🔄 正在初始連線雲端...</div>
+    <div id="syncStatus" class="status-bar">🔄 正在載入雲端同步數據...</div>
     
+    <button class="sync-btn" onclick="syncAllFromCloud()">🔄 點擊刷新/同步全家人數據</button>
+
     <div class="chart-container">
         <canvas id="kcalChart" style="width:100%; height:190px;"></canvas>
     </div>
@@ -99,7 +101,6 @@
 </div>
 
 <script>
-    // 🔗 你的專屬 Web App URL
     const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwZzY5dRW47mIR2jBHDsa47JlTQmQD2OlM93Z31_2mn6QsEFfE2LEOdwXbAmngri_7QXw/exec';
 
     const MED_TEMPLATES = [
@@ -110,31 +111,19 @@
         { name: "止痛",   morning: false, night: false, inNeed: true }
     ];
 
-    let foodData = JSON.parse(localStorage.getItem('momo_food')) || [];
-    let medState = JSON.parse(localStorage.getItem('momo_med_table_state'));
-    if (!medState || medState.length !== MED_TEMPLATES.length) {
-        medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
-    }
-
-    let historyData = []; // 儲存由新到舊排序的數據 (Newest to Oldest)
+    let foodData = [];
+    let medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
+    let historyData = []; 
     let lastActiveDate = localStorage.getItem('momo_last_date');
     let myChart = null; 
 
-    // 格式化日期函數：例如 "Mon 15-Jun-26"
     function formatToMomoDate(dateInput) {
         try {
             const d = new Date(dateInput);
             if (isNaN(d.getTime())) return dateInput; 
-            
             const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
             const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-            
-            const weekday = weekdays[d.getDay()];
-            const day = String(d.getDate()).padStart(2, '0');
-            const month = months[d.getMonth()];
-            const year = String(d.getFullYear()).slice(-2); 
-            
-            return `${weekday} ${day}-${month}-${year}`;
+            return `${weekdays[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}-${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
         } catch(e) { return dateInput; }
     }
 
@@ -142,99 +131,101 @@
         const select = document.getElementById('foodSelect');
         const ratio = parseFloat(select.options[select.selectedIndex].getAttribute('data-ratio'));
         const amount = parseFloat(document.getElementById('foodAmount').value) || 0;
-        const result = (amount * ratio).toFixed(1);
-        document.getElementById('calcPreview').innerText = `= ${result} kcal`;
+        document.getElementById('calcPreview').innerText = `= ${(amount * ratio).toFixed(1)} kcal`;
     }
 
-    async function checkMidnightArchive() {
+    // 🌟 全家核心：從雲端實時抓取當下最新數據
+    async function syncAllFromCloud() {
+        document.getElementById('syncStatus').innerText = "🔄 正在同步全家人數據...";
         const now = new Date();
         const currentDateStr = now.toLocaleDateString('zh-HK'); 
         document.getElementById('displayDate').innerText = "今日日期: " + currentDateStr;
 
+        // 處理跨天自動封存
         if (lastActiveDate && lastActiveDate !== currentDateStr) {
-            if (foodData.length > 0 || medState.some(m => m.morningTaken || m.nightTaken || m.inNeedCount > 0)) {
-                const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
-                const details = foodData.map(f => `${f.name}[${f.amount}g/ml](${f.cal}kcal)`).join(', ') || '無紀錄';
-                const medsText = medState.map(m => {
-                    let parts = [];
-                    const template = MED_TEMPLATES.find(t => t.name === m.name);
-                    if (template.morning) parts.push(`早:${m.morningTaken ? '✅':'❌'}`);
-                    if (template.night) parts.push(`夜:${m.nightTaken ? '✅':'❌'}`);
-                    if (template.inNeed) parts.push(`需:${m.inNeedCount}次`);
-                    return `${m.name}(${parts.join(',')})`;
-                }).join(' | ');
-
-                try {
-                    await fetch(GOOGLE_SCRIPT_URL, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        body: JSON.stringify({ action: "append", date: lastActiveDate, totalCal, details, meds: medsText })
-                    });
-                    foodData = [];
-                    medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
-                } catch (e) { console.error(e); }
-            }
+            await archiveDayToCloud(lastActiveDate);
+            lastActiveDate = currentDateStr;
+            localStorage.setItem('momo_last_date', lastActiveDate);
         }
-        lastActiveDate = currentDateStr;
-        localStorage.setItem('momo_last_date', lastActiveDate);
-        saveLocal();
-        renderTodayData();
-        fetchHistoryFromCloud();
-    }
-
-    async function fetchHistoryFromCloud() {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000); 
 
         try {
-            let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`, { method: 'GET', signal: controller.signal });
-            clearTimeout(timeoutId);
-            let rawData = await response.json();
-            
-            // 💡 關鍵排序：將歷史數據統一按照時間「從新到舊 (Newest to Oldest)」排序
+            // 1. 讀取今日動態
+            let resToday = await fetch(`${GOOGLE_SCRIPT_URL}?action=getToday`);
+            let cloudToday = await resToday.json();
+            foodData = cloudToday.food || [];
+            if (cloudToday.meds && cloudToday.meds.length === medState.length) {
+                medState = cloudToday.meds;
+            } else {
+                medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
+            }
+
+            // 2. 讀取歷史
+            let resHistory = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`);
+            let rawData = await resHistory.json();
             rawData.sort((a, b) => new Date(b.date) - new Date(a.date));
+            historyData = rawData.map(item => { item.formattedDate = formatToMomoDate(item.date); return item; });
 
-            // 格式化日期顯示
-            historyData = rawData.map(item => {
-                item.formattedDate = formatToMomoDate(item.date); 
-                return item;
-            });
-
-            renderHistoryData();
-            updateChart(); // 刷新趨勢圖
-            document.getElementById('syncStatus').innerText = "✅ 雲端連線成功";
-        } catch (e) {
-            clearTimeout(timeoutId);
-            document.getElementById('syncStatus').innerText = "⚠️ 離線使用中 (數據將於午夜上傳)";
+            renderTodayData();
             renderHistoryData();
             updateChart();
+            document.getElementById('syncStatus').innerText = "✅ 全家數據已實時同步";
+        } catch (e) {
+            document.getElementById('syncStatus').innerText = "⚠️ 連線失敗，請檢查網路後點擊重試";
         }
     }
 
-    // 📊 核心圖表渲染邏輯 (升級為最新 1 個月 / 30 天長度)
+    async function pushTodayToCloud() {
+        const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
+        try {
+            await fetch(GOOGLE_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "updateToday", totalCal, food: foodData, meds: medState })
+            });
+            document.getElementById('syncStatus').innerText = "✅ 數據已實時推送到雲端";
+        } catch(e) {
+            document.getElementById('syncStatus').innerText = "⚠️ 傳送失敗，請重新點擊刷新按鈕";
+        }
+    }
+
+    async function archiveDayToCloud(oldDate) {
+        if (foodData.length > 0 || medState.some(m => m.morningTaken || m.nightTaken || m.inNeedCount > 0)) {
+            const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
+            const details = foodData.map(f => `${f.name}[${f.amount}g/ml](${f.cal}kcal)`).join(', ') || '無紀錄';
+            const medsText = medState.map(m => {
+                let parts = [];
+                const template = MED_TEMPLATES.find(t => t.name === m.name);
+                if (template.morning) parts.push(`早:${m.morningTaken ? '✅':'❌'}`);
+                if (template.night) parts.push(`夜:${m.nightTaken ? '✅':'❌'}`);
+                if (template.inNeed) parts.push(`需:${m.inNeedCount}次`);
+                return `${m.name}(${parts.join(',')})`;
+            }).join(' | ');
+
+            try {
+                await fetch(GOOGLE_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    body: JSON.stringify({ action: "archive", date: oldDate, details, meds: medsText })
+                });
+            } catch (e) { console.error(e); }
+        }
+        foodData = [];
+        medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
+    }
+
     function updateChart() {
         const ctx = document.getElementById('kcalChart').getContext('2d');
-        
-        // 1. 因為 historyData 是由新到舊，圖表橫軸必須是「由舊到新」，所以要倒轉複製
         let chartData = [...historyData].reverse(); 
-        
-        // 2. 💡 鎖定最新一個月：截取最後 30 天數據
         if(chartData.length > 30) chartData = chartData.slice(-30); 
-
-        // 3. 圖表標籤優化：30天太多字，過濾掉星期幾，只顯示日與月，例如 "15-Jun"
         const labels = chartData.map(h => {
-            const parts = h.formattedDate.split(' '); // 分割 "Mon 15-Jun-26"
-            return parts[1] ? parts[1].replace(/-26$/, '') : h.formattedDate; // 變成 "15-Jun"
+            const parts = h.formattedDate.split(' ');
+            return parts[1] ? parts[1].replace(/-26$/, '') : h.formattedDate;
         });
-        
         const kvals = chartData.map(h => parseFloat(h.totalCal) || 0);
-
-        // 🟢/🔴 140kcal 門檻顏色判定
         const pointColors = kvals.map(v => v >= 140 ? '#badc58' : '#ff7675');
         const pointBorderColors = kvals.map(v => v >= 140 ? '#6ab04c' : '#d63031');
 
         if (myChart) { myChart.destroy(); } 
-
         myChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -246,8 +237,7 @@
                     borderWidth: 2.5,
                     pointBackgroundColor: pointColors,
                     pointBorderColor: pointBorderColors,
-                    pointRadius: chartData.length > 15 ? 4 : 5, // 點多時自動縮小防擁擠
-                    pointHoverRadius: 7,
+                    pointRadius: chartData.length > 15 ? 4 : 5,
                     tension: 0.15,
                     fill: false
                 }]
@@ -255,44 +245,16 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                let val = context.parsed.y;
-                                return `卡路里: ${val} kcal (${val >= 140 ? '🟢 達標' : '🔴 唔夠秤'})`;
-                            }
-                        }
-                    }
-                },
+                plugins: { legend: { display: false } },
                 scales: {
-                    y: {
-                        min: 0,
-                        suggestedMax: 200,
-                        ticks: {
-                            stepSize: 20, // 👈 縱軸刻度固定以 20 為單位
-                            color: '#666',
-                            font: { size: 10 }
-                        },
-                        grid: { color: '#f5f5f5' }
-                    },
-                    x: { 
-                        ticks: { 
-                            color: '#666', 
-                            font: { size: 9 },
-                            maxRotation: 45, // 30天數據時自動斜放防重疊
-                            autoSkip: true,   // 手機畫面上自動隔日跳過標籤防止字體撞埋一齊
-                            maxTicksLimit: 10 // 限制橫軸最多顯示 10 個日期文字
-                        }, 
-                        grid: { display: false } 
-                    }
+                    y: { min: 0, suggestedMax: 200, ticks: { stepSize: 20, color: '#666' } },
+                    x: { ticks: { color: '#666', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } }
                 }
             }
         });
     }
 
-    function addFood() {
+    async function addFood() {
         const select = document.getElementById('foodSelect');
         const name = select.value;
         const ratio = parseFloat(select.options[select.selectedIndex].getAttribute('data-ratio'));
@@ -301,34 +263,27 @@
         if (!isNaN(amount) && amount > 0) { 
             const cal = Math.round(amount * ratio * 10) / 10; 
             foodData.push({ name, amount, cal }); 
-            saveLocal(); 
             renderTodayData(); 
             document.getElementById('foodAmount').value = '';
             document.getElementById('calcPreview').innerText = '= 0 kcal';
+            await pushTodayToCloud(); // 實時上傳
         }
     }
 
-    function toggleTableMed(idx, period) {
+    async function toggleTableMed(idx, period) {
         if (period === 'morning') medState[idx].morningTaken = !medState[idx].morningTaken;
         if (period === 'night') medState[idx].nightTaken = !medState[idx].nightTaken;
-        saveLocal(); renderTodayData();
+        renderTodayData();
+        await pushTodayToCloud(); // 實時上傳
     }
 
-    function incrementInNeed(idx) { medState[idx].inNeedCount += 1; saveLocal(); renderTodayData(); }
-    function resetInNeed(idx) { medState[idx].inNeedCount = 0; saveLocal(); renderTodayData(); }
-
-    function saveLocal() {
-        localStorage.setItem('momo_food', JSON.stringify(foodData));
-        localStorage.setItem('momo_med_table_state', JSON.stringify(medState));
-    }
+    async function incrementInNeed(idx) { medState[idx].inNeedCount += 1; renderTodayData(); await pushTodayToCloud(); }
+    async function resetInNeed(idx) { medState[idx].inNeedCount = 0; renderTodayData(); await pushTodayToCloud(); }
 
     function renderTodayData() {
         const fList = document.getElementById('foodList'); fList.innerHTML = '';
         let total = 0;
-        foodData.forEach(f => { 
-            total += f.cal; 
-            fList.innerHTML += `<li><span>${f.name} (${f.amount} g/ml)</span> <strong>${f.cal} kcal</strong></li>`; 
-        });
+        foodData.forEach(f => { total += f.cal; fList.innerHTML += `<li><span>${f.name} (${f.amount} g/ml)</span> <strong>${f.cal} kcal</strong></li>`; });
         document.getElementById('totalCal').innerText = total.toFixed(1);
 
         const tBody = document.getElementById('medTableBody'); tBody.innerHTML = '';
@@ -348,7 +303,6 @@
                 const count = medState[i].inNeedCount;
                 rowHtml += `<td><button class="med-btn ${count>0?'yes':'no'}" onclick="incrementInNeed(${i})" ondblclick="resetInNeed(${i})">${count > 0 ? '✅ '+count+' 次' : '❌ 未餵'}</button></td>`;
             } else { rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`; }
-            
             rowHtml += `</tr>`;
             tBody.innerHTML += rowHtml;
         });
@@ -356,22 +310,14 @@
 
     function renderHistoryData() {
         const hList = document.getElementById('historyList');
-
-        if(historyData.length === 0) {
-            hList.innerHTML = "<p style='color:#888;text-align:center;padding:20px;'>暫無雲端紀錄。</p>";
-            return;
-        }
-        // 💡 這裡直接使用已經由新到舊排序好的 historyData 進行渲染
+        if(historyData.length === 0) { hList.innerHTML = "<p style='color:#888;text-align:center;padding:20px;'>暫無雲端紀錄。</p>"; return; }
         hList.innerHTML = historyData.map(h => {
             const val = parseFloat(h.totalCal) || 0;
-            const statusStyle = val >= 140 ? 'color:#6ab04c; font-weight:bold;' : 'color:#ff7675; font-weight:bold;';
-            const statusIcon = val >= 140 ? '🟢' : '⚠️ 唔夠秤';
-            
             return `
                 <div class="history-card">
-                    <strong>📅 ${h.formattedDate}</strong> | <span style="${statusStyle}">${statusIcon} ${h.totalCal} kcal</span><br>
-                    <div style="margin-top:5px; color:#555; font-size:0.9em; word-break: break-all;">🍖 飲食: ${h.details}</div>
-                    <div style="color:#555; font-size:0.85em; margin-top:3px; word-break: break-all; border-top:1px dashed #eee; padding-top:3px;">💊 藥物: ${h.meds}</div>
+                    <strong>📅 ${h.formattedDate}</strong> | <span style="${val >= 140 ? 'color:#6ab04c' : 'color:#ff7675'}; font-weight:bold;">${val >= 140 ? '🟢' : '⚠️ 唔夠秤'} ${h.totalCal} kcal</span><br>
+                    <div style="margin-top:5px; color:#555; font-size:0.9em;">🍖 飲食: ${h.details}</div>
+                    <div style="color:#555; font-size:0.85em; margin-top:3px; border-top:1px dashed #eee; padding-top:3px;">💊 藥物: ${h.meds}</div>
                 </div>
             `;
         }).join('');
@@ -382,11 +328,11 @@
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById(tab + 'Tab').classList.add('active');
         event.currentTarget.classList.add('active');
-        if(tab === 'history') { fetchHistoryFromCloud(); }
+        if(tab === 'history') { syncAllFromCloud(); }
     }
 
-    checkMidnightArchive();
-    updateChart();
+    if (!lastActiveDate) localStorage.setItem('momo_last_date', new Date().toLocaleDateString('zh-HK'));
+    syncAllFromCloud(); // 網頁打開時自動實時拉取雲端
 </script>
 </body>
 </html>
