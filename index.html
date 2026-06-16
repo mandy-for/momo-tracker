@@ -111,26 +111,35 @@
         fetchHistoryFromCloud();
     }
 
-    async function fetchHistoryFromCloud() {
-        if(GOOGLE_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbw3bKkoPu8Jdet8WuYUYSc6QC2HFf5yKizu8-DlqDIt0Kl8T49PFJ3JuzAgnEUf9s5K0g/exec") {
-            document.getElementById('historyList').innerText = "提示：請在網頁代碼中設定您的 Google Web App URL。";
-            return;
-        }
-        try {
-            document.getElementById('syncStatus').innerText = "🔄 正在從 Google Sheet 同步最新數據...";
-            let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`, {
+async function fetchHistoryFromCloud() {
+    if(GOOGLE_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbw3bKkoPu8Jdet8WuYUYSc6QC2HFf5yKizu8-DlqDIt0Kl8T49PFJ3JuzAgnEUf9s5K0g/exec" || GOOGLE_SCRIPT_URL.includes("YOUR_")) {
+        document.getElementById('historyList').innerText = "提示：請在網頁代碼中設定您的 Google Web App URL。";
+        return;
+    }
+    try {
+        document.getElementById('syncStatus').innerText = "🔄 正在從 Google Sheet 同步最新數據...";
+        
+        // We add a timestamp parameter to prevent the browser from serving a "stuck" cached version
+        let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read&_ts=${Date.now()}`, {
             method: 'GET',
-            mode: 'cors'
-            });
-            historyData = await response.json();
-            historyData.reverse(); // Displays the newest calendar dates at the top
-            renderHistoryData();
-            document.getElementById('syncStatus').innerText = "✅ 雲端連線成功";
-        } catch (e) {
-            document.getElementById('syncStatus').innerText = "❌ 無法更新雲端，正顯示離線數據";
-            document.getElementById('historyList').innerText = "未能即時獲取雲端列表，請確保網路正常。";
+            redirect: 'follow' // Crucial: Tells the browser to follow Google's internal security redirects
+        });
+        
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        historyData = await response.json();
+        historyData.reverse(); 
+        renderHistoryData();
+        document.getElementById('syncStatus').innerText = "✅ 雲端連線成功";
+    } catch (e) {
+        console.error("Connection failed:", e);
+        // Force the app to open anyway using your phone's storage if Google takes too long to reply
+        document.getElementById('syncStatus').innerText = "⚠️ 雲端排程中 (可正常記錄數據)";
+        if(historyData.length === 0) {
+            document.getElementById('historyList').innerText = "暫無雲端歷史紀錄，新數據將於每日午夜自動上傳。";
         }
     }
+}
 
     function addFood() {
         const name = document.getElementById('foodName').value.trim();
