@@ -24,6 +24,16 @@
         .history-card { border: 1px solid #eee; padding: 12px; border-radius: 12px; margin-bottom: 10px; font-size: 0.95em; background: #fafafa; }
         .status-bar { text-align: center; font-size: 0.85em; color: #666; background: #f0f0f0; padding: 6px; border-radius: 8px; margin-bottom: 15px; font-weight: bold; }
         .calc-preview { font-size: 0.85em; color: #888; margin-left: 5px; margin-top: 2px; }
+        
+        /* 📊 藥物表格專用樣式 */
+        .med-table { width: 100%; border-collapse: collapse; margin-top: 10px; background: white; border-radius: 8px; overflow: hidden; }
+        .med-table th, .med-table td { border: 1px solid #eee; padding: 10px 5px; text-align: center; font-size: 0.9em; }
+        .med-table th { background: #ffeaeae7; color: #ff6b81; font-weight: bold; }
+        .med-table td:first-child { font-weight: bold; color: #444; text-align: left; padding-left: 10px; }
+        .med-btn { border: none; padding: 6px 8px; border-radius: 6px; font-size: 0.8em; font-weight: bold; cursor: pointer; width: 100%; box-sizing: border-box; }
+        .med-btn.yes { background: #badc58; color: #333; }
+        .med-btn.no { background: #ffeaa7; color: #d63031; }
+        .med-btn.disabled { background: #f5f5f5; color: #bbb; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -60,13 +70,19 @@
         </div>
 
         <div class="section">
-            <h3>💊 藥物 / 保健品狀態</h3>
-            <div class="input-group">
-                <input type="text" id="medName" placeholder="藥名/維他命">
-                <select id="medTime"><option>早上</option><option>中午</option><option>夜晚</option><option>需要時</option></select>
-                <button onclick="addMed()">新增藥物狀態</button>
-            </div>
-            <ul id="medList"></ul>
+            <h3>💊 今日處方藥物進度表</h3>
+            <table class="med-table">
+                <thead>
+                    <tr>
+                        <th style="width: 34%;">藥物名稱</th>
+                        <th style="width: 22%;">早上</th>
+                        <th style="width: 22%;">夜晚</th>
+                        <th style="width: 22%;">需要時</th>
+                    </tr>
+                </thead>
+                <tbody id="medTableBody">
+                    </tbody>
+            </table>
         </div>
     </div>
 
@@ -77,15 +93,34 @@
 </div>
 
 <script>
-    // ✅ 你的專屬 Web App URL 已成功植入
+    // 🔗 你的專屬 Web App URL
     const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwZzY5dRW47mIR2jBHDsa47JlTQmQD2OlM93Z31_2mn6QsEFfE2LEOdwXbAmngri_7QXw/exec';
 
+    // 🌟 固定處方藥物清單定義
+    const MED_TEMPLATES = [
+        { name: "Rapros", morning: true, night: true, inNeed: false },
+        { name: "K",      morning: true, night: true, inNeed: false },
+        { name: "BP",     morning: true, night: true, inNeed: false },
+        { name: "開胃",   morning: false, night: false, inNeed: true },
+        { name: "止痛",   morning: false, night: false, inNeed: true }
+    ];
+
     let foodData = JSON.parse(localStorage.getItem('momo_food')) || [];
-    let medData = JSON.parse(localStorage.getItem('momo_med')) || [];
+    
+    // 初始化或讀取藥物狀態庫
+    let medState = JSON.parse(localStorage.getItem('momo_med_table_state'));
+    if (!medState || medState.length !== MED_TEMPLATES.length) {
+        medState = MED_TEMPLATES.map(m => ({
+            name: m.name,
+            morningTaken: false,
+            nightTaken: false,
+            inNeedCount: 0  // 需要時服用紀錄次數
+        }));
+    }
+
     let historyData = [];
     let lastActiveDate = localStorage.getItem('momo_last_date');
 
-    // 實時更新卡路里預覽文字
     function updateCalcPreview() {
         const select = document.getElementById('foodSelect');
         const ratio = parseFloat(select.options[select.selectedIndex].getAttribute('data-ratio'));
@@ -100,19 +135,35 @@
         document.getElementById('displayDate').innerText = "今日日期: " + currentDateStr;
 
         if (lastActiveDate && lastActiveDate !== currentDateStr) {
-            if (foodData.length > 0 || medData.length > 0) {
+            if (foodData.length > 0 || medState.some(m => m.morningTaken || m.nightTaken || m.inNeedCount > 0)) {
                 const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
                 const details = foodData.map(f => `${f.name}[${f.amount}g/ml](${f.cal}kcal)`).join(', ') || '無紀錄';
-                const meds = medData.map(m => `${m.name}(${m.taken ? '✅已餵':'❌未餵'})`).join(', ') || '無紀錄';
+                
+                // 將表格狀態轉化為文字格式存入 Google Sheet
+                const medsText = medState.map(m => {
+                    let parts = [];
+                    const template = MED_TEMPLATES.find(t => t.name === m.name);
+                    if (template.morning) parts.push(`早:${m.morningTaken ? '✅':'❌'}`);
+                    if (template.night) parts.push(`夜:${m.nightTaken ? '✅':'❌'}`);
+                    if (template.inNeed) parts.push(`需:${m.inNeedCount}次`);
+                    return `${m.name}(${parts.join(',')})`;
+                }).join(' | ');
 
                 try {
                     await fetch(GOOGLE_SCRIPT_URL, {
                         method: 'POST',
                         mode: 'no-cors',
-                        body: JSON.stringify({ action: "append", date: lastActiveDate, totalCal, details, meds })
+                        body: JSON.stringify({ action: "append", date: lastActiveDate, totalCal, details, meds: medsText })
                     });
+                    
+                    // 跨天重置數據
                     foodData = [];
-                    medData = [];
+                    medState = MED_TEMPLATES.map(m => ({
+                        name: m.name,
+                        morningTaken: false,
+                        nightTaken: false,
+                        inNeedCount: 0
+                    }));
                 } catch (e) { console.error(e); }
             }
         }
@@ -151,7 +202,7 @@
         const amount = parseFloat(document.getElementById('foodAmount').value);
         
         if (!isNaN(amount) && amount > 0) { 
-            const cal = Math.round(amount * ratio * 10) / 10; // 四捨五入保留一位小數
+            const cal = Math.round(amount * ratio * 10) / 10; 
             foodData.push({ name, amount, cal }); 
             saveLocal(); 
             renderTodayData(); 
@@ -160,23 +211,35 @@
         }
     }
 
-    function addMed() {
-        const name = document.getElementById('medName').value.trim();
-        const time = document.getElementById('medTime').value;
-        if (name) { 
-            medData.push({name, time, taken: false}); 
-            saveLocal(); renderTodayData(); 
-            document.getElementById('medName').value = '';
-        }
+    // 切換早晚藥物打勾狀態
+    function toggleTableMed(idx, period) {
+        if (period === 'morning') medState[idx].morningTaken = !medState[idx].morningTaken;
+        if (period === 'night') medState[idx].nightTaken = !medState[idx].nightTaken;
+        saveLocal();
+        renderTodayData();
     }
 
-    function toggleMed(idx) { medData[idx].taken = !medData[idx].taken; saveLocal(); renderTodayData(); }
+    // 增加需要時服用藥物次數
+    function incrementInNeed(idx) {
+        medState[idx].inNeedCount += 1;
+        saveLocal();
+        renderTodayData();
+    }
+    
+    // 長按/雙擊可以重置需要時服用的次數 (防呆修正)
+    function resetInNeed(idx) {
+        medState[idx].inNeedCount = 0;
+        saveLocal();
+        renderTodayData();
+    }
+
     function saveLocal() {
         localStorage.setItem('momo_food', JSON.stringify(foodData));
-        localStorage.setItem('momo_med', JSON.stringify(medData));
+        localStorage.setItem('momo_med_table_state', JSON.stringify(medState));
     }
 
     function renderTodayData() {
+        // 渲染食物
         const fList = document.getElementById('foodList'); fList.innerHTML = '';
         let total = 0;
         foodData.forEach(f => { 
@@ -185,9 +248,37 @@
         });
         document.getElementById('totalCal').innerText = total.toFixed(1);
 
-        const mList = document.getElementById('medList'); mList.innerHTML = '';
-        medData.forEach((m, i) => {
-            mList.innerHTML += `<li><span>[${m.time}] ${m.name}</span> <button onclick="toggleMed(${i})" style="background:${m.taken?'#badc58':'#ffeaa7'}; color:${m.taken?'#444':'#d63031'}; width:auto; margin-top:0; padding: 5px 10px;">${m.taken ? '✅ 已餵' : '❌ 未餵'}</button></li>`;
+        // 渲染全新藥物表格
+        const tBody = document.getElementById('medTableBody'); tBody.innerHTML = '';
+        MED_TEMPLATES.forEach((m, i) => {
+            let rowHtml = `<tr><td>${m.name}</td>`;
+            
+            // 早上欄位
+            if (m.morning) {
+                const taken = medState[i].morningTaken;
+                rowHtml += `<td><button class="med-btn ${taken?'yes':'no'}" onclick="toggleTableMed(${i}, 'morning')">${taken?'✅ 已餵':'❌ 未餵'}</button></td>`;
+            } else {
+                rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
+            }
+            
+            // 夜晚欄位
+            if (m.night) {
+                const taken = medState[i].nightTaken;
+                rowHtml += `<td><button class="med-btn ${taken?'yes':'no'}" onclick="toggleTableMed(${i}, 'night')">${taken?'✅ 已餵':'❌ 未餵'}</button></td>`;
+            } else {
+                rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
+            }
+            
+            // 需要時欄位
+            if (m.inNeed) {
+                const count = medState[i].inNeedCount;
+                rowHtml += `<td><button class="med-btn ${count>0?'yes':'no'}" onclick="incrementInNeed(${i})" ondblclick="resetInNeed(${i})">${count > 0 ? '✅ '+count+' 次' : '❌ 未餵'}</button></td>`;
+            } else {
+                rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
+            }
+            
+            rowHtml += `</tr>`;
+            tBody.innerHTML += rowHtml;
         });
     }
 
@@ -201,7 +292,7 @@
             <div class="history-card">
                 <strong>📅 ${h.date}</strong> | <span style="color:#ff6b81;font-weight:bold;">🔥 ${h.totalCal} kcal</span><br>
                 <div style="margin-top:5px; color:#555; font-size:0.9em; word-break: break-all;">🍖 飲食: ${h.details}</div>
-                <div style="color:#555; font-size:0.9em; word-break: break-all;">💊 藥物: ${h.meds}</div>
+                <div style="color:#555; font-size:0.85em; margin-top:3px; word-break: break-all; border-top:1px dashed #eee; padding-top:3px;">💊 藥物: ${h.meds}</div>
             </div>
         `).join('');
     }
