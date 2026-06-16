@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🐱😽 Momo 雲端管家</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root { --primary: #ff9a9e; --bg: #fff5f5; --text: #333; }
         body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 15px; display: flex; justify-content: center; }
@@ -25,7 +26,6 @@
         .status-bar { text-align: center; font-size: 0.85em; color: #666; background: #f0f0f0; padding: 6px; border-radius: 8px; margin-bottom: 15px; font-weight: bold; }
         .calc-preview { font-size: 0.85em; color: #888; margin-left: 5px; margin-top: 2px; }
         
-        /* 📊 藥物表格專用樣式 */
         .med-table { width: 100%; border-collapse: collapse; margin-top: 10px; background: white; border-radius: 8px; overflow: hidden; }
         .med-table th, .med-table td { border: 1px solid #eee; padding: 10px 5px; text-align: center; font-size: 0.9em; }
         .med-table th { background: #ffeaeae7; color: #ff6b81; font-weight: bold; }
@@ -34,6 +34,9 @@
         .med-btn.yes { background: #badc58; color: #333; }
         .med-btn.no { background: #ffeaa7; color: #d63031; }
         .med-btn.disabled { background: #f5f5f5; color: #bbb; cursor: not-allowed; }
+        
+        /* 圖表專用外框 */
+        .chart-container { background: #fff; border: 1px solid #eee; padding: 10px; border-radius: 12px; margin-bottom: 15px; position: relative; width: 100%; box-sizing: border-box; }
     </style>
 </head>
 <body>
@@ -42,6 +45,10 @@
     <h1>🐱😽 Momo 雲端管家</h1>
     <div id="syncStatus" class="status-bar">🔄 正在初始連線雲端...</div>
     
+    <div class="chart-container">
+        <canvas id="kcalChart" style="width:100%; height:180px;"></canvas>
+    </div>
+
     <div class="tabs">
         <button class="tab-btn active" onclick="switchTab('today')">今日紀錄</button>
         <button class="tab-btn" onclick="switchTab('history')">歷史回顧 📜</button>
@@ -80,8 +87,7 @@
                         <th style="width: 22%;">需要時</th>
                     </tr>
                 </thead>
-                <tbody id="medTableBody">
-                    </tbody>
+                <tbody id="medTableBody"></tbody>
             </table>
         </div>
     </div>
@@ -93,10 +99,8 @@
 </div>
 
 <script>
-    // 🔗 你的專屬 Web App URL
     const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwZzY5dRW47mIR2jBHDsa47JlTQmQD2OlM93Z31_2mn6QsEFfE2LEOdwXbAmngri_7QXw/exec';
 
-    // 🌟 固定處方藥物清單定義
     const MED_TEMPLATES = [
         { name: "Rapros", morning: true, night: true, inNeed: false },
         { name: "K",      morning: true, night: true, inNeed: false },
@@ -106,20 +110,34 @@
     ];
 
     let foodData = JSON.parse(localStorage.getItem('momo_food')) || [];
-    
-    // 初始化或讀取藥物狀態庫
     let medState = JSON.parse(localStorage.getItem('momo_med_table_state'));
     if (!medState || medState.length !== MED_TEMPLATES.length) {
-        medState = MED_TEMPLATES.map(m => ({
-            name: m.name,
-            morningTaken: false,
-            nightTaken: false,
-            inNeedCount: 0  // 需要時服用紀錄次數
-        }));
+        medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
     }
 
     let historyData = [];
     let lastActiveDate = localStorage.getItem('momo_last_date');
+    let myChart = null; // 存放圖表對象
+
+    // 格式化日期函數：將任何日期轉化為 "Mon 15-Jun-26" 格式
+    function formatToMomoDate(dateInput) {
+        try {
+            const d = new Date(dateInput);
+            if (isNaN(d.getTime())) return dateInput; // 如果不是有效日期，回傳原文字
+            
+            const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+            const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            
+            const weekday = weekdays[d.getDay()];
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = months[d.getMonth()];
+            const year = String(d.getFullYear()).slice(-2); // 攞後兩位數例如 26
+            
+            return `${weekday} ${day}-${month}-${year}`;
+        } catch(e) {
+            return dateInput;
+        }
+    }
 
     function updateCalcPreview() {
         const select = document.getElementById('foodSelect');
@@ -138,8 +156,6 @@
             if (foodData.length > 0 || medState.some(m => m.morningTaken || m.nightTaken || m.inNeedCount > 0)) {
                 const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
                 const details = foodData.map(f => `${f.name}[${f.amount}g/ml](${f.cal}kcal)`).join(', ') || '無紀錄';
-                
-                // 將表格狀態轉化為文字格式存入 Google Sheet
                 const medsText = medState.map(m => {
                     let parts = [];
                     const template = MED_TEMPLATES.find(t => t.name === m.name);
@@ -155,15 +171,8 @@
                         mode: 'no-cors',
                         body: JSON.stringify({ action: "append", date: lastActiveDate, totalCal, details, meds: medsText })
                     });
-                    
-                    // 跨天重置數據
                     foodData = [];
-                    medState = MED_TEMPLATES.map(m => ({
-                        name: m.name,
-                        morningTaken: false,
-                        nightTaken: false,
-                        inNeedCount: 0
-                    }));
+                    medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
                 } catch (e) { console.error(e); }
             }
         }
@@ -179,20 +188,91 @@
         const timeoutId = setTimeout(() => controller.abort(), 3000); 
 
         try {
-            let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`, { 
-                method: 'GET',
-                signal: controller.signal
-            });
+            let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`, { method: 'GET', signal: controller.signal });
             clearTimeout(timeoutId);
             historyData = await response.json();
-            historyData.reverse();
+            
+            // 處理所有歷史數據的日期格式
+            historyData = historyData.map(item => {
+                item.originalDate = item.date; // 留底備用
+                item.date = formatToMomoDate(item.date); // 簡化
+                return item;
+            });
+
             renderHistoryData();
+            updateChart(); // 刷新圖表
             document.getElementById('syncStatus').innerText = "✅ 雲端連線成功";
         } catch (e) {
             clearTimeout(timeoutId);
             document.getElementById('syncStatus').innerText = "⚠️ 離線使用中 (數據將於午夜上傳)";
             renderHistoryData();
+            updateChart();
         }
+    }
+
+    // 📊 核心圖表渲染邏輯
+    function updateChart() {
+        const ctx = document.getElementById('kcalChart').getContext('2d');
+        
+        // 攞最近 7 筆數據作顯示（如果無數據就顯示空白預設）
+        let chartData = [...historyData].reverse(); // 轉返正序時間軸
+        if(chartData.length > 7) chartData = chartData.slice(-7); // 只攞最近一星期
+
+        const labels = chartData.map(h => h.date.replace(/^[A-Za-z]+\s/, '')); // 移除星期幾令圖表橫軸更乾淨
+        const kvals = chartData.map(h => parseFloat(h.totalCal) || 0);
+
+        // 動態判定顏色：大於等於 140 綠色，小於 140 紅色
+        const pointColors = kvals.map(v => v >= 140 ? '#badc58' : '#ff7675');
+        const pointBorderColors = kvals.map(v => v >= 140 ? '#6ab04c' : '#d63031');
+
+        if (myChart) { myChart.destroy(); } // 銷毀舊圖表防止重疊
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels.length ? labels : ['無數據'],
+                datasets: [{
+                    label: '每日卡路里 (kcal)',
+                    data: kvals.length ? kvals : [0],
+                    borderColor: '#ff9a9e',
+                    borderWidth: 3,
+                    pointBackgroundColor: pointColors,
+                    pointBorderColor: pointBorderColors,
+                    pointRadius: 6,
+                    pointHoverRadius: 8,
+                    tension: 0.2,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    // 加入 140kcal 橫向安全基準線提示
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let val = context.parsed.y;
+                                return `卡路里: ${val} kcal (${val >= 140 ? '🟢 達標' : '🔴 未達標'})`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 0,
+                        suggestedMax: 200,
+                        ticks: {
+                            stepSize: 20, // 👈 強制設定間距為 20
+                            color: '#666'
+                        },
+                        grid: { color: '#f0f0f0' }
+                    },
+                    x: { ticks: { color: '#666' }, grid: { display: false } }
+                }
+            }
+        });
     }
 
     function addFood() {
@@ -211,27 +291,14 @@
         }
     }
 
-    // 切換早晚藥物打勾狀態
     function toggleTableMed(idx, period) {
         if (period === 'morning') medState[idx].morningTaken = !medState[idx].morningTaken;
         if (period === 'night') medState[idx].nightTaken = !medState[idx].nightTaken;
-        saveLocal();
-        renderTodayData();
+        saveLocal(); renderTodayData();
     }
 
-    // 增加需要時服用藥物次數
-    function incrementInNeed(idx) {
-        medState[idx].inNeedCount += 1;
-        saveLocal();
-        renderTodayData();
-    }
-    
-    // 長按/雙擊可以重置需要時服用的次數 (防呆修正)
-    function resetInNeed(idx) {
-        medState[idx].inNeedCount = 0;
-        saveLocal();
-        renderTodayData();
-    }
+    function incrementInNeed(idx) { medState[idx].inNeedCount += 1; saveLocal(); renderTodayData(); }
+    function resetInNeed(idx) { medState[idx].inNeedCount = 0; saveLocal(); renderTodayData(); }
 
     function saveLocal() {
         localStorage.setItem('momo_food', JSON.stringify(foodData));
@@ -239,7 +306,6 @@
     }
 
     function renderTodayData() {
-        // 渲染食物
         const fList = document.getElementById('foodList'); fList.innerHTML = '';
         let total = 0;
         foodData.forEach(f => { 
@@ -248,34 +314,23 @@
         });
         document.getElementById('totalCal').innerText = total.toFixed(1);
 
-        // 渲染全新藥物表格
         const tBody = document.getElementById('medTableBody'); tBody.innerHTML = '';
         MED_TEMPLATES.forEach((m, i) => {
             let rowHtml = `<tr><td>${m.name}</td>`;
-            
-            // 早上欄位
             if (m.morning) {
                 const taken = medState[i].morningTaken;
                 rowHtml += `<td><button class="med-btn ${taken?'yes':'no'}" onclick="toggleTableMed(${i}, 'morning')">${taken?'✅ 已餵':'❌ 未餵'}</button></td>`;
-            } else {
-                rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
-            }
+            } else { rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`; }
             
-            // 夜晚欄位
             if (m.night) {
                 const taken = medState[i].nightTaken;
                 rowHtml += `<td><button class="med-btn ${taken?'yes':'no'}" onclick="toggleTableMed(${i}, 'night')">${taken?'✅ 已餵':'❌ 未餵'}</button></td>`;
-            } else {
-                rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
-            }
+            } else { rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`; }
             
-            // 需要時欄位
             if (m.inNeed) {
                 const count = medState[i].inNeedCount;
                 rowHtml += `<td><button class="med-btn ${count>0?'yes':'no'}" onclick="incrementInNeed(${i})" ondblclick="resetInNeed(${i})">${count > 0 ? '✅ '+count+' 次' : '❌ 未餵'}</button></td>`;
-            } else {
-                rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
-            }
+            } else { rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`; }
             
             rowHtml += `</tr>`;
             tBody.innerHTML += rowHtml;
@@ -284,17 +339,26 @@
 
     function renderHistoryData() {
         const hList = document.getElementById('historyList');
-        if(historyData.length === 0) {
-            hList.innerHTML = "<p style='color:#888;text-align:center;padding:20px;'>暫無雲端紀錄。今日數據將於跨天時自動建檔。</p>";
+        const reversedData = [...historyData]; // 歷史列表維持最新日期排最前
+
+        if(reversedData.length === 0) {
+            hList.innerHTML = "<p style='color:#888;text-align:center;padding:20px;'>暫無雲端紀錄。</p>";
             return;
         }
-        hList.innerHTML = historyData.map(h => `
-            <div class="history-card">
-                <strong>📅 ${h.date}</strong> | <span style="color:#ff6b81;font-weight:bold;">🔥 ${h.totalCal} kcal</span><br>
-                <div style="margin-top:5px; color:#555; font-size:0.9em; word-break: break-all;">🍖 飲食: ${h.details}</div>
-                <div style="color:#555; font-size:0.85em; margin-top:3px; word-break: break-all; border-top:1px dashed #eee; padding-top:3px;">💊 藥物: ${h.meds}</div>
-            </div>
-        `).join('');
+        hList.innerHTML = reversedData.map(h => {
+            const val = parseFloat(h.totalCal) || 0;
+            // 歷史清單同步判定：少於 140 顯示紅字警告，達標顯示綠字
+            const statusStyle = val >= 140 ? 'color:#6ab04c; font-weight:bold;' : 'color:#ff7675; font-weight:bold;';
+            const statusIcon = val >= 140 ? '🟢' : '⚠️ 唔夠秤';
+            
+            return `
+                <div class="history-card">
+                    <strong>📅 ${h.date}</strong> | <span style="${statusStyle}">${statusIcon} ${h.totalCal} kcal</span><br>
+                    <div style="margin-top:5px; color:#555; font-size:0.9em; word-break: break-all;">🍖 飲食: ${h.details}</div>
+                    <div style="color:#555; font-size:0.85em; margin-top:3px; word-break: break-all; border-top:1px dashed #eee; padding-top:3px;">💊 藥物: ${h.meds}</div>
+                </div>
+            `;
+        }).join('');
     }
 
     function switchTab(tab) {
@@ -305,7 +369,9 @@
         if(tab === 'history') { fetchHistoryFromCloud(); }
     }
 
+    // 初始載入
     checkMidnightArchive();
+    updateChart();
 </script>
 </body>
 </html>
