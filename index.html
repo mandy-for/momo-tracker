@@ -6,7 +6,7 @@
     <title>🐱😽 Momo 雲端管家</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root { --primary: #ff9a9e; --bg: #fff5f5; --text: #333; }
+        :root { --primary: #ff9a9e; --bg: #fff5f5; --text: #333; --blue: #74b9ff; }
         body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 15px; display: flex; justify-content: center; }
         .container { max-width: 500px; width: 100%; background: white; padding: 20px; border-radius: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
         h1 { text-align: center; color: #ff6b81; margin-bottom: 5px; font-size: 1.6em; }
@@ -16,10 +16,12 @@
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         .section { background: #fff9f9; padding: 15px; border-radius: 12px; margin-bottom: 15px; border-left: 5px solid var(--primary); }
+        .section.water-sec { background: #f0f7ff; border-left: 5px solid var(--blue); }
         .input-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
         .row-inputs { display: flex; gap: 5px; }
         input, select { padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 1em; width: 100%; box-sizing: border-box; }
         button { background: #ff6b81; color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; font-size: 1em; margin-top: 5px; }
+        .water-sec button { background: var(--blue); }
         ul { list-style: none; padding: 0; margin: 0; }
         li { background: white; padding: 10px; margin-top: 5px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #eee; }
         .history-card { border: 1px solid #eee; padding: 12px; border-radius: 12px; margin-bottom: 10px; font-size: 0.95em; background: #fafafa; }
@@ -37,6 +39,7 @@
         
         .chart-container { background: #fff; border: 1px solid #eee; padding: 10px; border-radius: 12px; margin-bottom: 15px; position: relative; width: 100%; box-sizing: border-box; }
         .sync-btn { background: #6ab04c; margin-bottom: 15px; }
+        .chart-view-select { margin-bottom: 8px; font-weight: bold; background: #fffdfd; border: 2px solid #ff9a9e; color: #ff6b81; }
     </style>
 </head>
 <body>
@@ -48,6 +51,10 @@
     <button class="sync-btn" onclick="syncAllFromCloud()">🔄 點擊刷新/同步全家人數據</button>
 
     <div class="chart-container">
+        <select id="chartViewType" class="chart-view-select" onchange="updateChart()">
+            <option value="kcal">📊 查看最近一個月：卡路里趨勢圖</option>
+            <option value="water">💧 查看最近一個月：飲水量趨勢圖</option>
+        </select>
         <canvas id="kcalChart" style="width:100%; height:190px;"></canvas>
     </div>
 
@@ -60,13 +67,13 @@
         <p id="displayDate" style="text-align:center; color:#555; font-weight: bold; margin-bottom: 15px;"></p>
         
         <div class="section">
-            <h3>🍖 飲食紀錄 (自動計算卡路里)</h3>
+            <h3>🍖 飲食紀錄 (自動計算卡路里及水份)</h3>
             <div class="input-group">
                 <select id="foodSelect" onchange="updateCalcPreview()">
-                    <option value="吱吱/腎活" data-ratio="1.0">吱吱/腎活 (1 kcal/g)</option>
-                    <option value="Reco" data-ratio="1.9">Reco (1.9 kcal/ml)</option>
-                    <option value="RC" data-ratio="1.0">RC (1.0 kcal/ml)</option>
-                    <option value="Others (0.5kcal/g)" data-ratio="0.5">Others (0.5 kcal/g)</option>
+                    <option value="吱吱/腎活" data-ratio="1.0" data-w="0.8">吱吱/腎活 (1 kcal | 水80%)</option>
+                    <option value="Reco" data-ratio="1.9" data-w="0.66">Reco (1.9 kcal | 水66%)</option>
+                    <option value="RC" data-ratio="1.0" data-w="0.8">RC (1.0 kcal | 水80%)</option>
+                    <option value="Others (0.5kcal/g)" data-ratio="0.5" data-w="0.7">Others (0.5 kcal | 水70%)</option>
                 </select>
                 <div class="row-inputs">
                     <input type="number" id="foodAmount" placeholder="輸入餵食量 (g/ml)" oninput="updateCalcPreview()">
@@ -76,6 +83,23 @@
             </div>
             <ul id="foodList"></ul>
             <p style="text-align:right; font-weight:bold; color: #ff6b81; font-size: 1.1em; margin-top: 10px;">今日總計: <span id="totalCal">0</span> kcal</p>
+        </div>
+
+        <div class="section water-sec">
+            <h3>💧 額外水分紀錄 (安全紅線: 150ml)</h3>
+            <div class="input-group">
+                <select id="waterSelect">
+                    <option value="直接喝水">直接喝水</option>
+                    <option value="皮下水">皮下水</option>
+                </select>
+                <input type="number" id="waterAmount" placeholder="輸入補水量 (ml)">
+                <button onclick="addWater()">新增補水紀錄</button>
+            </div>
+            <ul id="waterList"></ul>
+            <p style="text-align:right; font-weight:bold; color: #2d3436; font-size: 1em; margin-top: 10px;">
+                食物內含水: <span id="foodWater">0</span> ml<br>
+                <span style="color:var(--blue); font-size:1.1em;">今日總水分: <span id="totalWater">0</span> / 150 ml</span>
+            </p>
         </div>
 
         <div class="section">
@@ -112,6 +136,7 @@
     ];
 
     let foodData = [];
+    let waterData = []; // 儲存今日純水紀錄
     let medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
     let historyData = []; 
     let lastActiveDate = localStorage.getItem('momo_last_date');
@@ -130,18 +155,20 @@
     function updateCalcPreview() {
         const select = document.getElementById('foodSelect');
         const ratio = parseFloat(select.options[select.selectedIndex].getAttribute('data-ratio'));
+        const wRatio = parseFloat(select.options[select.selectedIndex].getAttribute('data-w'));
         const amount = parseFloat(document.getElementById('foodAmount').value) || 0;
-        document.getElementById('calcPreview').innerText = `= ${(amount * ratio).toFixed(1)} kcal`;
+        
+        const kcal = (amount * ratio).toFixed(1);
+        const wml = (amount * wRatio).toFixed(1);
+        document.getElementById('calcPreview').innerText = `= ${kcal} kcal (含水 ${wml}ml)`;
     }
 
-    // 🌟 全家核心：從雲端實時抓取當下最新數據
     async function syncAllFromCloud() {
         document.getElementById('syncStatus').innerText = "🔄 正在同步全家人數據...";
         const now = new Date();
         const currentDateStr = now.toLocaleDateString('zh-HK'); 
         document.getElementById('displayDate').innerText = "今日日期: " + currentDateStr;
 
-        // 處理跨天自動封存
         if (lastActiveDate && lastActiveDate !== currentDateStr) {
             await archiveDayToCloud(lastActiveDate);
             lastActiveDate = currentDateStr;
@@ -149,17 +176,13 @@
         }
 
         try {
-            // 1. 讀取今日動態
             let resToday = await fetch(`${GOOGLE_SCRIPT_URL}?action=getToday`);
             let cloudToday = await resToday.json();
             foodData = cloudToday.food || [];
-            if (cloudToday.meds && cloudToday.meds.length === medState.length) {
-                medState = cloudToday.meds;
-            } else {
-                medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
-            }
+            waterData = cloudToday.water || [];
+            if (cloudToday.meds && cloudToday.meds.length === medState.length) medState = cloudToday.meds;
+            else medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
 
-            // 2. 讀取歷史
             let resHistory = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`);
             let rawData = await resHistory.json();
             rawData.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -170,28 +193,43 @@
             updateChart();
             document.getElementById('syncStatus').innerText = "✅ 全家數據已實時同步";
         } catch (e) {
-            document.getElementById('syncStatus').innerText = "⚠️ 連線失敗，請檢查網路後點擊重試";
+            document.getElementById('syncStatus').innerText = "⚠️ 連線失敗，請點擊重試";
         }
     }
 
     async function pushTodayToCloud() {
         const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
+        const foodWaterTotal = foodData.reduce((s, i) => s + (i.wml || 0), 0);
+        const pureWaterTotal = waterData.reduce((s, i) => s + i.amount, 0);
+        const totalWaterCombined = Math.round((foodWaterTotal + pureWaterTotal) * 10) / 10;
+
         try {
             await fetch(GOOGLE_SCRIPT_URL, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify({ action: "updateToday", totalCal, food: foodData, meds: medState })
+                body: JSON.stringify({ 
+                    action: "updateToday", 
+                    totalCal, 
+                    food: foodData, 
+                    meds: medState, 
+                    totalWater: totalWaterCombined, 
+                    water: waterData 
+                })
             });
             document.getElementById('syncStatus').innerText = "✅ 數據已實時推送到雲端";
         } catch(e) {
-            document.getElementById('syncStatus').innerText = "⚠️ 傳送失敗，請重新點擊刷新按鈕";
+            document.getElementById('syncStatus').innerText = "⚠️ 傳送失敗，請點擊刷新重試";
         }
     }
 
     async function archiveDayToCloud(oldDate) {
-        if (foodData.length > 0 || medState.some(m => m.morningTaken || m.nightTaken || m.inNeedCount > 0)) {
-            const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
-            const details = foodData.map(f => `${f.name}[${f.amount}g/ml](${f.cal}kcal)`).join(', ') || '無紀錄';
+        const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
+        const foodWaterTotal = foodData.reduce((s, i) => s + (i.wml || 0), 0);
+        const pureWaterTotal = waterData.reduce((s, i) => s + i.amount, 0);
+        const totalWaterCombined = Math.round((foodWaterTotal + pureWaterTotal) * 10) / 10;
+
+        if (foodData.length > 0 || waterData.length > 0 || medState.some(m => m.morningTaken || m.nightTaken || m.inNeedCount > 0)) {
+            const details = foodData.map(f => `${f.name}[${f.amount}g/ml](${f.cal}kcal)`).join(', ') || '無飲食紀錄';
             const medsText = medState.map(m => {
                 let parts = [];
                 const template = MED_TEMPLATES.find(t => t.name === m.name);
@@ -200,30 +238,52 @@
                 if (template.inNeed) parts.push(`需:${m.inNeedCount}次`);
                 return `${m.name}(${parts.join(',')})`;
             }).join(' | ');
+            
+            const waterDetailsText = waterData.map(w => `${w.type}[${w.amount}ml]`).join(', ') + ` + 食物水[${foodWaterTotal.toFixed(1)}ml]`;
 
             try {
                 await fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
                     mode: 'no-cors',
-                    body: JSON.stringify({ action: "archive", date: oldDate, details, meds: medsText })
+                    body: JSON.stringify({ action: "archive", date: oldDate, details, meds: medsText, totalWater: totalWaterCombined, waterDetails: waterDetailsText })
                 });
             } catch (e) { console.error(e); }
         }
-        foodData = [];
+        foodData = []; waterData = [];
         medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
     }
 
     function updateChart() {
         const ctx = document.getElementById('kcalChart').getContext('2d');
+        const viewType = document.getElementById('chartViewType').value; // 'kcal' or 'water'
+        
         let chartData = [...historyData].reverse(); 
         if(chartData.length > 30) chartData = chartData.slice(-30); 
+        
         const labels = chartData.map(h => {
             const parts = h.formattedDate.split(' ');
             return parts[1] ? parts[1].replace(/-26$/, '') : h.formattedDate;
         });
-        const kvals = chartData.map(h => parseFloat(h.totalCal) || 0);
-        const pointColors = kvals.map(v => v >= 140 ? '#badc58' : '#ff7675');
-        const pointBorderColors = kvals.map(v => v >= 140 ? '#6ab04c' : '#d63031');
+
+        let yValues = [];
+        let targetLine = 140;
+        let activeColor = '#ff9a9e';
+        let labelText = '';
+
+        if (viewType === 'kcal') {
+            yValues = chartData.map(h => parseFloat(h.totalCal) || 0);
+            targetLine = 140;
+            activeColor = '#ff9a9e';
+            labelText = '每日卡路里 (kcal)';
+        } else {
+            yValues = chartData.map(h => parseFloat(h.totalWater) || 0);
+            targetLine = 150;
+            activeColor = '#74b9ff';
+            labelText = '每日總飲水量 (ml)';
+        }
+
+        const pointColors = yValues.map(v => v >= targetLine ? '#badc58' : '#ff7675');
+        const pointBorderColors = yValues.map(v => v >= targetLine ? '#6ab04c' : '#d63031');
 
         if (myChart) { myChart.destroy(); } 
         myChart = new Chart(ctx, {
@@ -231,9 +291,9 @@
             data: {
                 labels: labels.length ? labels : ['無數據'],
                 datasets: [{
-                    label: '每日卡路里',
-                    data: kvals.length ? kvals : [0],
-                    borderColor: '#ff9a9e',
+                    label: labelText,
+                    data: yValues.length ? yValues : [0],
+                    borderColor: activeColor,
                     borderWidth: 2.5,
                     pointBackgroundColor: pointColors,
                     pointBorderColor: pointBorderColors,
@@ -245,9 +305,20 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: { 
+                    legend: { display: true, labels: { font: { weight: 'bold' } } },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let val = context.parsed.y;
+                                let pass = val >= targetLine ? '🟢 達標' : '🔴 唔夠數';
+                                return `${viewType === 'kcal'?'卡路里':'水分'}: ${val} (${pass})`;
+                            }
+                        }
+                    }
+                },
                 scales: {
-                    y: { min: 0, suggestedMax: 200, ticks: { stepSize: 20, color: '#666' } },
+                    y: { min: 0, ticks: { stepSize: 20, color: '#666' }, grid: { color: '#f5f5f5' } },
                     x: { ticks: { color: '#666', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } }
                 }
             }
@@ -258,53 +329,77 @@
         const select = document.getElementById('foodSelect');
         const name = select.value;
         const ratio = parseFloat(select.options[select.selectedIndex].getAttribute('data-ratio'));
+        const wRatio = parseFloat(select.options[select.selectedIndex].getAttribute('data-w'));
         const amount = parseFloat(document.getElementById('foodAmount').value);
         
         if (!isNaN(amount) && amount > 0) { 
             const cal = Math.round(amount * ratio * 10) / 10; 
-            foodData.push({ name, amount, cal }); 
+            const wml = Math.round(amount * wRatio * 10) / 10; 
+            foodData.push({ name, amount, cal, wml }); 
             renderTodayData(); 
             document.getElementById('foodAmount').value = '';
             document.getElementById('calcPreview').innerText = '= 0 kcal';
-            await pushTodayToCloud(); // 實時上傳
+            await pushTodayToCloud();
+        }
+    }
+
+    async function addWater() {
+        const type = document.getElementById('waterSelect').value;
+        const amount = parseFloat(document.getElementById('waterAmount').value);
+        if (!isNaN(amount) && amount > 0) {
+            waterData.push({ type, amount });
+            renderTodayData();
+            document.getElementById('waterAmount').value = '';
+            await pushTodayToCloud();
         }
     }
 
     async function toggleTableMed(idx, period) {
         if (period === 'morning') medState[idx].morningTaken = !medState[idx].morningTaken;
         if (period === 'night') medState[idx].nightTaken = !medState[idx].nightTaken;
-        renderTodayData();
-        await pushTodayToCloud(); // 實時上傳
+        renderTodayData(); await pushTodayToCloud();
     }
 
     async function incrementInNeed(idx) { medState[idx].inNeedCount += 1; renderTodayData(); await pushTodayToCloud(); }
     async function resetInNeed(idx) { medState[idx].inNeedCount = 0; renderTodayData(); await pushTodayToCloud(); }
 
     function renderTodayData() {
+        // 渲染食物
         const fList = document.getElementById('foodList'); fList.innerHTML = '';
-        let total = 0;
-        foodData.forEach(f => { total += f.cal; fList.innerHTML += `<li><span>${f.name} (${f.amount} g/ml)</span> <strong>${f.cal} kcal</strong></li>`; });
-        document.getElementById('totalCal').innerText = total.toFixed(1);
+        let totalCal = 0; let foodWaterTotal = 0;
+        foodData.forEach(f => { 
+            totalCal += f.cal; 
+            foodWaterTotal += (f.wml || 0);
+            fList.innerHTML += `<li><span>${f.name} (${f.amount}g/ml)</span> <strong>${f.cal} kcal | 水:${f.wml}ml</strong></li>`; 
+        });
+        document.getElementById('totalCal').innerText = totalCal.toFixed(1);
+        document.getElementById('foodWater').innerText = foodWaterTotal.toFixed(1);
 
+        // 渲染純水
+        const wList = document.getElementById('waterList'); wList.innerHTML = '';
+        let pureWaterTotal = 0;
+        waterData.forEach(w => {
+            pureWaterTotal += w.amount;
+            wList.innerHTML += `<li><span>💧 ${w.type}</span> <strong>+ ${w.amount} ml</strong></li>`;
+        });
+        const finalWaterCombined = foodWaterTotal + pureWaterTotal;
+        document.getElementById('totalWater').innerText = finalWaterCombined.toFixed(1);
+        
+        // 變更安全紅線顏色
+        if(finalWaterCombined >= 150) { document.getElementById('totalWater').style.color = '#6ab04c'; }
+        else { document.getElementById('totalWater').style.color = '#ff7675'; }
+
+        // 藥物表格
         const tBody = document.getElementById('medTableBody'); tBody.innerHTML = '';
         MED_TEMPLATES.forEach((m, i) => {
             let rowHtml = `<tr><td>${m.name}</td>`;
-            if (m.morning) {
-                const taken = medState[i].morningTaken;
-                rowHtml += `<td><button class="med-btn ${taken?'yes':'no'}" onclick="toggleTableMed(${i}, 'morning')">${taken?'✅ 已餵':'❌ 未餵'}</button></td>`;
-            } else { rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`; }
-            
-            if (m.night) {
-                const taken = medState[i].nightTaken;
-                rowHtml += `<td><button class="med-btn ${taken?'yes':'no'}" onclick="toggleTableMed(${i}, 'night')">${taken?'✅ 已餵':'❌ 未餵'}</button></td>`;
-            } else { rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`; }
-            
-            if (m.inNeed) {
-                const count = medState[i].inNeedCount;
-                rowHtml += `<td><button class="med-btn ${count>0?'yes':'no'}" onclick="incrementInNeed(${i})" ondblclick="resetInNeed(${i})">${count > 0 ? '✅ '+count+' 次' : '❌ 未餵'}</button></td>`;
-            } else { rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`; }
-            rowHtml += `</tr>`;
-            tBody.innerHTML += rowHtml;
+            if (m.morning) rowHtml += `<td><button class="med-btn ${medState[i].morningTaken?'yes':'no'}" onclick="toggleTableMed(${i}, 'morning')">${medState[i].morningTaken?'✅ 已餵':'❌ 未餵'}</button></td>`;
+            else rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
+            if (m.night) rowHtml += `<td><button class="med-btn ${medState[i].nightTaken?'yes':'no'}" onclick="toggleTableMed(${i}, 'night')">${medState[i].nightTaken?'✅ 已餵':'❌ 未餵'}</button></td>`;
+            else rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
+            if (m.inNeed) rowHtml += `<td><button class="med-btn ${medState[i].inNeedCount>0?'yes':'no'}" onclick="incrementInNeed(${i})" ondblclick="resetInNeed(${i})">${medState[i].inNeedCount > 0 ? '✅ '+medState[i].inNeedCount+' 次' : '❌ 未餵'}</button></td>`;
+            else rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
+            tBody.innerHTML += rowHtml + `</tr>`;
         });
     }
 
@@ -312,11 +407,19 @@
         const hList = document.getElementById('historyList');
         if(historyData.length === 0) { hList.innerHTML = "<p style='color:#888;text-align:center;padding:20px;'>暫無雲端紀錄。</p>"; return; }
         hList.innerHTML = historyData.map(h => {
-            const val = parseFloat(h.totalCal) || 0;
+            const calVal = parseFloat(h.totalCal) || 0;
+            const watVal = parseFloat(h.totalWater) || 0;
+            
+            const calPass = calVal >= 140 ? '🟢' : '⚠️ 唔夠秤';
+            const watPass = watVal >= 150 ? '🟢' : '⚠️ 水不夠';
+            
             return `
                 <div class="history-card">
-                    <strong>📅 ${h.formattedDate}</strong> | <span style="${val >= 140 ? 'color:#6ab04c' : 'color:#ff7675'}; font-weight:bold;">${val >= 140 ? '🟢' : '⚠️ 唔夠秤'} ${h.totalCal} kcal</span><br>
+                    <strong>📅 ${h.formattedDate}</strong><br>
+                    <span style="font-weight:bold; color:${calVal>=140?'#6ab04c':'#ff7675'};">${calPass} 卡路里: ${h.totalCal} kcal</span> | 
+                    <span style="font-weight:bold; color:${watVal>=150?'#6ab04c':'#ff7675'};">${watPass} 總水份: ${watVal} ml</span>
                     <div style="margin-top:5px; color:#555; font-size:0.9em;">🍖 飲食: ${h.details}</div>
+                    <div style="color:#555; font-size:0.85em; margin-top:2px;">💧 水份明細: ${h.waterDetails || '無紀錄'}</div>
                     <div style="color:#555; font-size:0.85em; margin-top:3px; border-top:1px dashed #eee; padding-top:3px;">💊 藥物: ${h.meds}</div>
                 </div>
             `;
@@ -332,7 +435,7 @@
     }
 
     if (!lastActiveDate) localStorage.setItem('momo_last_date', new Date().toLocaleDateString('zh-HK'));
-    syncAllFromCloud(); // 網頁打開時自動實時拉取雲端
+    syncAllFromCloud();
 </script>
 </body>
 </html>
