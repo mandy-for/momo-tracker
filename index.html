@@ -70,7 +70,7 @@
 
 <script>
     // 
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyfHWx2XIEMHB_VqSiOol-4iOD3k-NwnFFtf13VH4AV6GvnJ5S972icBDXNBDxCNSOP/exec";
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw3bKkoPu8Jdet8WuYUYSc6QC2HFf5yKizu8-DlqDIt0Kl8T49PFJ3JuzAgnEUf9s5K0g/exec";
 
     let foodData = JSON.parse(localStorage.getItem('momo_foodCloud')) || [];
     let medData = JSON.parse(localStorage.getItem('momo_medCloud')) || [];
@@ -112,7 +112,7 @@
     }
 
     async function fetchHistoryFromCloud() {
-        if(GOOGLE_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbyfHWx2XIEMHB_VqSiOol-4iOD3k-NwnFFtf13VH4AV6GvnJ5S972icBDXNBDxCNSOP/exec") {
+        if(GOOGLE_SCRIPT_URL === "https://script.google.com/macros/s/AKfycbw3bKkoPu8Jdet8WuYUYSc6QC2HFf5yKizu8-DlqDIt0Kl8T49PFJ3JuzAgnEUf9s5K0g/exec") {
             document.getElementById('historyList').innerText = "提示：請在網頁代碼中設定您的 Google Web App URL。";
             return;
         }
