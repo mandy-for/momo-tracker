@@ -3,26 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Momo Cloud Tracker</title>
+    <title>🐱😽 Momo 雲端管家</title>
     <style>
         :root { --primary: #ff9a9e; --bg: #fff5f5; --text: #333; }
         body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 15px; display: flex; justify-content: center; }
         .container { max-width: 500px; width: 100%; background: white; padding: 20px; border-radius: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-        h1 { text-align: center; color: #ff6b81; margin-bottom: 5px; }
+        h1 { text-align: center; color: #ff6b81; margin-bottom: 5px; font-size: 1.6em; }
         .tabs { display: flex; gap: 10px; margin-bottom: 20px; margin-top: 15px; }
         .tab-btn { flex: 1; padding: 12px; border-radius: 10px; border: none; cursor: pointer; background: #eee; font-weight: bold; font-size: 0.95em; }
         .tab-btn.active { background: #ff6b81; color: white; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         .section { background: #fff9f9; padding: 15px; border-radius: 12px; margin-bottom: 15px; border-left: 5px solid var(--primary); }
-        .input-group { display: flex; gap: 5px; margin-bottom: 10px; }
+        .input-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+        .row-inputs { display: flex; gap: 5px; }
         input, select { padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 1em; width: 100%; box-sizing: border-box; }
-        .input-group input { width: auto; }
-        button { background: #ff6b81; color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        button { background: #ff6b81; color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; font-size: 1em; margin-top: 5px; }
         ul { list-style: none; padding: 0; margin: 0; }
         li { background: white; padding: 10px; margin-top: 5px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #eee; }
         .history-card { border: 1px solid #eee; padding: 12px; border-radius: 12px; margin-bottom: 10px; font-size: 0.95em; background: #fafafa; }
         .status-bar { text-align: center; font-size: 0.85em; color: #666; background: #f0f0f0; padding: 6px; border-radius: 8px; margin-bottom: 15px; font-weight: bold; }
+        .calc-preview { font-size: 0.85em; color: #888; margin-left: 5px; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -40,11 +41,19 @@
         <p id="displayDate" style="text-align:center; color:#555; font-weight: bold; margin-bottom: 15px;"></p>
         
         <div class="section">
-            <h3>🍖 飲食紀錄 (kcal)</h3>
+            <h3>🍖 飲食紀錄 (自動計算卡路里)</h3>
             <div class="input-group">
-                <input type="text" id="foodName" style="flex:2" placeholder="食物名稱">
-                <input type="number" id="calories" style="flex:1" placeholder="卡路里">
-                <button onclick="addFood()">新增</button>
+                <select id="foodSelect" onchange="updateCalcPreview()">
+                    <option value="吱吱/腎活" data-ratio="1.0">吱吱/腎活 (1 kcal/g)</option>
+                    <option value="Reco" data-ratio="1.9">Reco (1.9 kcal/ml)</option>
+                    <option value="RC" data-ratio="1.0">RC (1.0 kcal/ml)</option>
+                    <option value="Others (0.5kcal/g)" data-ratio="0.5">Others (0.5 kcal/g)</option>
+                </select>
+                <div class="row-inputs">
+                    <input type="number" id="foodAmount" placeholder="輸入餵食量 (g/ml)" oninput="updateCalcPreview()">
+                    <span id="calcPreview" class="calc-preview" style="align-self: center; white-space: nowrap; font-weight: bold; color: #777;">= 0 kcal</span>
+                </div>
+                <button onclick="addFood()">新增飲食紀錄</button>
             </div>
             <ul id="foodList"></ul>
             <p style="text-align:right; font-weight:bold; color: #ff6b81; font-size: 1.1em; margin-top: 10px;">今日總計: <span id="totalCal">0</span> kcal</p>
@@ -53,9 +62,9 @@
         <div class="section">
             <h3>💊 藥物 / 保健品狀態</h3>
             <div class="input-group">
-                <input type="text" id="medName" style="flex:2" placeholder="藥名/維他命">
-                <select id="medTime" style="flex:1"><option>早上</option><option>中午</option><option>夜晚</option><option>需要時</option></select>
-                <button onclick="addMed()">新增</button>
+                <input type="text" id="medName" placeholder="藥名/維他命">
+                <select id="medTime"><option>早上</option><option>中午</option><option>夜晚</option><option>需要時</option></select>
+                <button onclick="addMed()">新增藥物狀態</button>
             </div>
             <ul id="medList"></ul>
         </div>
@@ -68,13 +77,22 @@
 </div>
 
 <script>
-    // ⚠️ 把你在 STEP 2 複製的 Google Web App URL 貼到下面這行單引號中：
+    // ✅ 你的專屬 Web App URL 已成功植入
     const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwZzY5dRW47mIR2jBHDsa47JlTQmQD2OlM93Z31_2mn6QsEFfE2LEOdwXbAmngri_7QXw/exec';
 
     let foodData = JSON.parse(localStorage.getItem('momo_food')) || [];
     let medData = JSON.parse(localStorage.getItem('momo_med')) || [];
     let historyData = [];
     let lastActiveDate = localStorage.getItem('momo_last_date');
+
+    // 實時更新卡路里預覽文字
+    function updateCalcPreview() {
+        const select = document.getElementById('foodSelect');
+        const ratio = parseFloat(select.options[select.selectedIndex].getAttribute('data-ratio'));
+        const amount = parseFloat(document.getElementById('foodAmount').value) || 0;
+        const result = (amount * ratio).toFixed(1);
+        document.getElementById('calcPreview').innerText = `= ${result} kcal`;
+    }
 
     async function checkMidnightArchive() {
         const now = new Date();
@@ -84,7 +102,7 @@
         if (lastActiveDate && lastActiveDate !== currentDateStr) {
             if (foodData.length > 0 || medData.length > 0) {
                 const totalCal = foodData.reduce((s, i) => s + i.cal, 0);
-                const details = foodData.map(f => `${f.name}(${f.cal}kcal)`).join(', ') || '無紀錄';
+                const details = foodData.map(f => `${f.name}[${f.amount}g/ml](${f.cal}kcal)`).join(', ') || '無紀錄';
                 const meds = medData.map(m => `${m.name}(${m.taken ? '✅已餵':'❌未餵'})`).join(', ') || '無紀錄';
 
                 try {
@@ -106,9 +124,8 @@
     }
 
     async function fetchHistoryFromCloud() {
-        // Anti-freeze timeout fallback (3 seconds max)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const timeoutId = setTimeout(() => controller.abort(), 3000); 
 
         try {
             let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`, { 
@@ -128,13 +145,18 @@
     }
 
     function addFood() {
-        const name = document.getElementById('foodName').value.trim();
-        const cal = parseInt(document.getElementById('calories').value);
-        if (name && !isNaN(cal)) { 
-            foodData.push({name, cal}); 
-            saveLocal(); renderTodayData(); 
-            document.getElementById('foodName').value = '';
-            document.getElementById('calories').value = '';
+        const select = document.getElementById('foodSelect');
+        const name = select.value;
+        const ratio = parseFloat(select.options[select.selectedIndex].getAttribute('data-ratio'));
+        const amount = parseFloat(document.getElementById('foodAmount').value);
+        
+        if (!isNaN(amount) && amount > 0) { 
+            const cal = Math.round(amount * ratio * 10) / 10; // 四捨五入保留一位小數
+            foodData.push({ name, amount, cal }); 
+            saveLocal(); 
+            renderTodayData(); 
+            document.getElementById('foodAmount').value = '';
+            document.getElementById('calcPreview').innerText = '= 0 kcal';
         }
     }
 
@@ -157,12 +179,15 @@
     function renderTodayData() {
         const fList = document.getElementById('foodList'); fList.innerHTML = '';
         let total = 0;
-        foodData.forEach(f => { total += f.cal; fList.innerHTML += `<li><span>${f.name}</span> <strong>${f.cal} kcal</strong></li>`; });
-        document.getElementById('totalCal').innerText = total;
+        foodData.forEach(f => { 
+            total += f.cal; 
+            fList.innerHTML += `<li><span>${f.name} (${f.amount} g/ml)</span> <strong>${f.cal} kcal</strong></li>`; 
+        });
+        document.getElementById('totalCal').innerText = total.toFixed(1);
 
         const mList = document.getElementById('medList'); mList.innerHTML = '';
         medData.forEach((m, i) => {
-            mList.innerHTML += `<li><span>[${m.time}] ${m.name}</span> <button onclick="toggleMed(${i})" style="background:${m.taken?'#badc58':'#ffeaa7'}; color:${m.taken?'#444':'#d63031'}">${m.taken ? '✅ 已餵' : '❌ 未餵'}</button></li>`;
+            mList.innerHTML += `<li><span>[${m.time}] ${m.name}</span> <button onclick="toggleMed(${i})" style="background:${m.taken?'#badc58':'#ffeaa7'}; color:${m.taken?'#444':'#d63031'}; width:auto; margin-top:0; padding: 5px 10px;">${m.taken ? '✅ 已餵' : '❌ 未餵'}</button></li>`;
         });
     }
 
@@ -175,8 +200,8 @@
         hList.innerHTML = historyData.map(h => `
             <div class="history-card">
                 <strong>📅 ${h.date}</strong> | <span style="color:#ff6b81;font-weight:bold;">🔥 ${h.totalCal} kcal</span><br>
-                <div style="margin-top:5px; color:#555;">🍖 飲食: ${h.details}</div>
-                <div style="color:#555;">💊 藥物: ${h.meds}</div>
+                <div style="margin-top:5px; color:#555; font-size:0.9em; word-break: break-all;">🍖 飲食: ${h.details}</div>
+                <div style="color:#555; font-size:0.9em; word-break: break-all;">💊 藥物: ${h.meds}</div>
             </div>
         `).join('');
     }
