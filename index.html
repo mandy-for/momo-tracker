@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🐱😽 Momo 雲端管家</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root { --primary: #ff9a9e; --bg: #fff5f5; --text: #333; --blue: #74b9ff; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 15px; display: flex; justify-content: center; margin: 0; }
-        .container { max-width: 500px; width: 100%; background: white; padding: 20px; border-radius: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); box-sizing: border-box; }
+        :root { --primary: #ff9a9e; --bg: #fff5f5; --text: #333; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 15px; display: flex; justify-content: center; }
+        .container { max-width: 500px; width: 100%; background: white; padding: 20px; border-radius: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
         h1 { text-align: center; color: #ff6b81; margin-bottom: 5px; font-size: 1.6em; }
         .tabs { display: flex; gap: 10px; margin-bottom: 20px; margin-top: 15px; }
         .tab-btn { flex: 1; padding: 12px; border-radius: 10px; border: none; cursor: pointer; background: #eee; font-weight: bold; font-size: 0.95em; }
@@ -15,12 +16,10 @@
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         .section { background: #fff9f9; padding: 15px; border-radius: 12px; margin-bottom: 15px; border-left: 5px solid var(--primary); }
-        .section.water-sec { background: #f0f7ff; border-left: 5px solid var(--blue); }
         .input-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
         .row-inputs { display: flex; gap: 5px; }
         input, select { padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 1em; width: 100%; box-sizing: border-box; }
         button { background: #ff6b81; color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; font-size: 1em; margin-top: 5px; }
-        .water-sec button { background: var(--blue); }
         ul { list-style: none; padding: 0; margin: 0; }
         li { background: white; padding: 10px; margin-top: 5px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #eee; }
         .history-card { border: 1px solid #eee; padding: 12px; border-radius: 12px; margin-bottom: 10px; font-size: 0.95em; background: #fafafa; }
@@ -36,6 +35,7 @@
         .med-btn.no { background: #ffeaa7; color: #d63031; }
         .med-btn.disabled { background: #f5f5f5; color: #bbb; cursor: not-allowed; }
         
+        .chart-container { background: #fff; border: 1px solid #eee; padding: 10px; border-radius: 12px; margin-bottom: 15px; position: relative; width: 100%; box-sizing: border-box; }
         .sync-btn { background: #6ab04c; margin-bottom: 15px; }
     </style>
 </head>
@@ -46,6 +46,10 @@
     <div id="syncStatus" class="status-bar">🔄 正在載入雲端同步數據...</div>
     
     <button class="sync-btn" onclick="syncAllFromCloud()">🔄 點擊刷新/同步全家人數據</button>
+
+    <div class="chart-container">
+        <canvas id="kcalChart" style="width:100%; height:190px;"></canvas>
+    </div>
 
     <div class="tabs">
         <button class="tab-btn active" onclick="switchTab('today')">今日紀錄</button>
@@ -90,7 +94,7 @@
                 <span style="color:var(--blue); font-size:1.1em;">今日總水分: <span id="totalWater">0</span> / 150 ml</span>
             </p>
         </div>
-
+        
         <div class="section">
             <h3>💊 今日處方藥物進度表</h3>
             <table class="med-table">
@@ -129,6 +133,7 @@
     let medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
     let historyData = []; 
     let lastActiveDate = localStorage.getItem('momo_last_date');
+    let myChart = null; 
 
     function formatToMomoDate(dateInput) {
         try {
@@ -178,6 +183,7 @@
 
             renderTodayData();
             renderHistoryData();
+            updateChart();
             document.getElementById('syncStatus').innerText = "✅ 全家數據已實時同步";
         } catch (e) {
             document.getElementById('syncStatus').innerText = "⚠️ 連線失敗，請點擊重試";
@@ -238,6 +244,72 @@
         }
         foodData = []; waterData = [];
         medState = MED_TEMPLATES.map(m => ({ name: m.name, morningTaken: false, nightTaken: false, inNeedCount: 0 }));
+    }
+
+    function updateChart() {
+        const canvas = document.getElementById('kcalChart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const viewType = document.getElementById('chartViewType').value; 
+        
+        let chartData = [...historyData].reverse(); 
+        if(chartData.length > 30) chartData = chartData.slice(-30); 
+        
+        const labels = chartData.map(h => {
+            const parts = h.formattedDate.split(' ');
+            return parts[1] ? parts[1].replace(/-26$/, '') : h.formattedDate;
+        });
+
+        let yValues = [];
+        let targetLine = 140;
+        let activeColor = '#ff9a9e';
+        let labelText = '';
+
+        if (viewType === 'kcal') {
+            yValues = chartData.map(h => parseFloat(h.totalCal) || 0);
+            targetLine = 140;
+            activeColor = '#ff9a9e';
+            labelText = '每日卡路里 (kcal)';
+        } else {
+            yValues = chartData.map(h => parseFloat(h.totalWater) || 0);
+            targetLine = 150;
+            activeColor = '#74b9ff';
+            labelText = '每日總飲水量 (ml)';
+        }
+
+        const pointColors = yValues.map(v => v >= targetLine ? '#badc58' : '#ff7675');
+        const pointBorderColors = yValues.map(v => v >= targetLine ? '#6ab04c' : '#d63031');
+
+        if (myChart) { myChart.destroy(); } 
+        
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels.length ? labels : ['無數據'],
+                datasets: [{
+                    label: labelText,
+                    data: yValues.length ? yValues : [0],
+                    borderColor: activeColor,
+                    borderWidth: 2.5,
+                    pointBackgroundColor: pointColors,
+                    pointBorderColor: pointBorderColors,
+                    pointRadius: chartData.length > 15 ? 3 : 4,
+                    tension: 0.15,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false, // 🛡️ 核心修正：配合外框絕對鎖死高度
+                plugins: { 
+                    legend: { display: true, labels: { font: { weight: 'bold', size: 11 } } }
+                },
+                scales: {
+                    y: { min: 0, ticks: { color: '#666', font: { size: 10 } }, grid: { color: '#f5f5f5' } },
+                    x: { ticks: { color: '#666', font: { size: 9 }, maxTicksLimit: 8 }, grid: { display: false } }
+                }
+            }
+        });
     }
 
     async function addFood() {
@@ -306,4 +378,46 @@
             let rowHtml = `<tr><td>${m.name}</td>`;
             if (m.morning) rowHtml += `<td><button class="med-btn ${medState[i].morningTaken?'yes':'no'}" onclick="toggleTableMed(${i}, 'morning')">${medState[i].morningTaken?'✅ 已餵':'❌ 未餵'}</button></td>`;
             else rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
-            if (m.night) rowHtml += `<td><button class="med-btn ${medState
+            if (m.night) rowHtml += `<td><button class="med-btn ${medState[i].nightTaken?'yes':'no'}" onclick="toggleTableMed(${i}, 'night')">${medState[i].nightTaken?'✅ 已餵':'❌ 未餵'}</button></td>`;
+            else rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
+            if (m.inNeed) rowHtml += `<td><button class="med-btn ${medState[i].inNeedCount>0?'yes':'no'}" onclick="incrementInNeed(${i})" ondblclick="resetInNeed(${i})">${medState[i].inNeedCount > 0 ? '✅ '+medState[i].inNeedCount+' 次' : '❌ 未餵'}</button></td>`;
+            else rowHtml += `<td><button class="med-btn disabled" disabled>-</button></td>`;
+            tBody.innerHTML += rowHtml + `</tr>`;
+        });
+    }
+
+    function renderHistoryData() {
+        const hList = document.getElementById('historyList');
+        if(historyData.length === 0) { hList.innerHTML = "<p style='color:#888;text-align:center;padding:20px;'>暫無雲端紀錄。</p>"; return; }
+        hList.innerHTML = historyData.map(h => {
+            const calVal = parseFloat(h.totalCal) || 0;
+            const watVal = parseFloat(h.totalWater) || 0;
+            const calPass = calVal >= 140 ? '🟢' : '⚠️ 唔夠秤';
+            const watPass = watVal >= 150 ? '🟢' : '⚠️ 水不夠';
+            
+            return `
+                <div class="history-card">
+                    <strong>📅 ${h.formattedDate}</strong><br>
+                    <span style="font-weight:bold; color:${calVal>=140?'#6ab04c':'#ff7675'};">${calPass} 卡路里: ${h.totalCal} kcal</span> | 
+                    <span style="font-weight:bold; color:${watVal>=150?'#6ab04c':'#ff7675'};">${watPass} 總水份: ${watVal} ml</span>
+                    <div style="margin-top:5px; color:#555; font-size:0.9em;">🍖 飲食: ${h.details}</div>
+                    <div style="color:#555; font-size:0.85em; margin-top:2px;">💧 水份明細: ${h.waterDetails || '無紀錄'}</div>
+                    <div style="color:#555; font-size:0.85em; margin-top:3px; border-top:1px dashed #eee; padding-top:3px;">💊 藥物: ${h.meds}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function switchTab(tab) {
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(tab + 'Tab').classList.add('active');
+        event.currentTarget.classList.add('active');
+        if(tab === 'history') { syncAllFromCloud(); }
+    }
+
+    if (!lastActiveDate) localStorage.setItem('momo_last_date', new Date().toLocaleDateString('zh-HK'));
+    syncAllFromCloud();
+</script>
+</body>
+</html>
