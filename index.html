@@ -118,7 +118,10 @@
         }
         try {
             document.getElementById('syncStatus').innerText = "🔄 正在從 Google Sheet 同步最新數據...";
-            let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`);
+let response = await fetch(`${GOOGLE_SCRIPT_URL}?action=read`, {
+    method: 'GET',
+    mode: 'cors'
+});
             historyData = await response.json();
             historyData.reverse(); // Displays the newest calendar dates at the top
             renderHistoryData();
